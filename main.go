@@ -4,11 +4,11 @@ import (
 	"net"
 	"os"
 
+	"github.com/urfave/cli/v2"
+
 	"github.com/kondukto-io/kntrl/kntrl"
 	"github.com/kondukto-io/kntrl/logger"
 	"github.com/kondukto-io/kntrl/utils"
-
-	"github.com/urfave/cli/v2"
 )
 
 func main() {
@@ -24,7 +24,7 @@ func main() {
 			&cli.StringFlag{
 				Name:  "hosts",
 				Value: "",
-				Usage: "enter ip or hostname (192.168.0.100, example.com)",
+				Usage: "enter ip or hostname (192.168.0.100, example.com, .github.com)",
 			},
 			&cli.StringFlag{
 				Name:  "level",
@@ -33,7 +33,7 @@ func main() {
 			},
 		},
 		Action: func(c *cli.Context) error {
-			var hosts []net.IP
+			var ips []net.IP
 			var err error
 			modeType := uint32(0)
 
@@ -43,7 +43,7 @@ func main() {
 			mode := c.String("mode")
 			switch mode {
 			case "allowlist", "allow":
-				hosts, err = utils.ParseHosts(c.String("hosts"))
+				ips, err = utils.ParseHosts(c.String("hosts"))
 				if err != nil {
 					return err
 				}
@@ -54,10 +54,10 @@ func main() {
 				logger.Log.Infof("mode=[%s]", mode)
 			}
 
-			logger.Log.Debugf("IPs:%v", hosts)
+			logger.Log.Debugf("IPs:%v", ips)
 
 			//return kntrl.Run(mode, hosts)
-			return kntrl.Run(modeType, hosts)
+			return kntrl.Run(modeType, ips)
 		},
 	}
 
