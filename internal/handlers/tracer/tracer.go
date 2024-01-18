@@ -31,7 +31,6 @@ var (
 )
 
 const (
-	//prog       = "./internal/handlers/tracer/bpf_bpfel_x86.o"
 	rootCgroup = "/sys/fs/cgroup"
 )
 
@@ -230,8 +229,9 @@ func Run(cmd cobra.Command) error {
 		}
 
 		var reportEvent = domain.ReportEvent{
-			ProcessID:          event.Pid,
-			TaskName:           string(event.Task[:]),
+			ProcessID: event.Pid,
+			//TaskName:           string(event.Task[:]),
+			TaskName:           utils.XTrim(event.Task),
 			Protocol:           domain.EventProtocolTCP,
 			DestinationAddress: utils.IntToIP(event.Daddr).String(),
 			DestinationPort:    event.Dport,
