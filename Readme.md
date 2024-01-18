@@ -26,10 +26,10 @@ The agent supports the following parameters:
 
 | Name                     | Default               | Description                                                                                                                                                                                                                                                                                                                                                               |
 | ------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mode`                   |                       | kntrl for detected behaviours (monitor or prevent/trace)                                                                                                                                                                                                                                                                                                                  |
-| `hosts`                  |                       | allowed host list                                                                                                                                                                                                                                                                                                                                                         |
-| `level`                  |                       | level of detail for logging (normal, debug)                                                                                                                                                                                                                                                                                                                               |
-| `output-file`                  |                       | report file |                                                                                                                                                                                                                                     |
+| `mode`                   |   monitor                    | kntrl for detected behaviours (monitor or prevent/trace)                                                                                                                                                                                                                                                                                                                  |
+| `hosts`                  |                       | allowed host list. IP or hostname (192.168.0.100, example.com, .github.com)                                                                                                                                                                                                                                                                                                                                                         |
+| `level`                  |   info              | level of detail for logging (info, debug)                                                                                                                                                                                                                                                                                                                               |
+| `output-file`                  | `/tmp/kntrl.out`                       | report file |                                                                                                                                                                                                                                     |
 
 ### Running kntrl on monitoring mode
 
@@ -82,7 +82,7 @@ Pid  | Comm | Proto | Domain                           | Destination Addr   | Po
 ------------------------------------------------------------------------------------
 2806 | curl | tcp   | lb-140-82-114-22-iad.github.com. | 140.82.114.22:443  | pass
 ------------------------------------------------------------------------------------
-2806 | curl | tcp   | ww-in-f95.1e100.net.             | 142.251.167.95:443 | bloc
+2806 | curl | tcp   | ww-in-f95.1e100.net.             | 142.251.167.95:443 | block
 ------------------------------------------------------------------------------------
 ```
 
