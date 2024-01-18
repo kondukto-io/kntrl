@@ -50,8 +50,6 @@ func NewReporter(outputFileName string) *Reporter {
 
 // WriteEvent adds an event to the report file
 func (r *Reporter) WriteEvent(event domain.ReportEvent) {
-	r.events = append(r.events, event)
-
 	var address = event.DestinationAddress + ":" + fmt.Sprint(event.DestinationPort)
 	var hash = hash(address)
 
@@ -60,6 +58,7 @@ func (r *Reporter) WriteEvent(event domain.ReportEvent) {
 		return
 	}
 
+	r.events = append(r.events, event)
 	r.eventsHashMap[hash] = true
 
 	eventData, err := json.Marshal(event)
@@ -103,7 +102,7 @@ func (r *Reporter) openReportFile() (*os.File, error) {
 }
 
 func (r *Reporter) printReportTable() {
-	fmt.Println("\n")
+	fmt.Print("\n\n")
 	data := pterm.TableData{
 		{"Pid", "Comm", "Proto", "Domain", "Destination Addr", "Policy"},
 	}
