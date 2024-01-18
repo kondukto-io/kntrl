@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/cilium/ebpf"
@@ -25,7 +24,7 @@ import (
 )
 
 const (
-	prog       = "./kntrl/bpf_bpfel_x86.o"
+	prog       = "./internal/handlers/tracer/bpf_bpfel_x86.o"
 	rootCgroup = "/sys/fs/cgroup"
 )
 
@@ -192,7 +191,7 @@ func Run(cmd cobra.Command) error {
 		}
 	}()
 
-	allowedHostsAddress := []string{".github.com", ".kondukto.io"}
+	//allowedHostsAddress := []string{".github.com", ".kondukto.io"}
 
 	var event domain.IP4Event
 	for {
@@ -215,24 +214,24 @@ func Run(cmd cobra.Command) error {
 			domain = append(domain, ".")
 		}
 
-		for i := 0; i < len(allowedHosts); i++ {
-			for v := 0; v < len(domain); v++ {
-				if strings.Contains(domain[v], allowedHostsAddress[i]) {
-					ipUint32 := utils.IntToIP(event.Daddr)
-					if err := allowMap.Put(ipUint32, uint32(1)); err != nil {
-						logger.Log.Fatalf("failed to update allow list (map): %s", err)
-					}
-					logger.Log.Infof("add ---->%d", ipUint32)
-				}
-			}
-		}
+		//for i := 0; i < len(allowedHosts); i++ {
+		//	for v := 0; v < len(domain); v++ {
+		//		if strings.Contains(domain[v], allowedHostsAddress[i]) {
+		//			ipUint32 := utils.IntToIP(event.Daddr)
+		//			if err := allowMap.Put(ipUint32, uint32(1)); err != nil {
+		//				logger.Log.Fatalf("failed to update allow list (map): %s", err)
+		//			}
+		//			logger.Log.Infof("add ---->%d", ipUint32)
+		//		}
+		//	}
+		//}
 
-		logger.Log.Infof("[%d]%-16s -> %-15s (%s) %-6d",
+		logger.Log.Infof("[%d]%s -> %s:%d (%s)",
 			event.Pid,
 			event.Task,
 			utils.IntToIP(event.Daddr),
-			domain,
 			event.Dport,
+			domain,
 		)
 	}
 
