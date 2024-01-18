@@ -3,6 +3,7 @@ package domain
 const (
 	// TracerModeMonitor is the monitor mode
 	TracerModeMonitor = "monitor"
+
 	// TracerModeTrace is the trace mode
 	TracerModeTrace = "trace"
 

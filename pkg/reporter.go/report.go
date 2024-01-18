@@ -3,21 +3,19 @@ package reporter
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"os"
-	"strconv"
 
 	"github.com/kondukto-io/kntrl/internal/core/domain"
 	"github.com/kondukto-io/kntrl/pkg/logger"
-	"github.com/kondukto-io/kntrl/utils"
-	"github.com/pterm/pterm"
 )
 
 // Reporter is a reporter for events
 type Reporter struct {
-	events         []domain.IP4Event
+	events         []domain.ReportEvent
 	eventsHashMap  map[string]bool
 	Err            error
 	outputFileName string
@@ -58,9 +56,9 @@ func NewReporter(outputFileName string) Reporter {
 	return report
 }
 
-// AddEvent adds an event to the reporter
-func (r *Reporter) AddEvent(event domain.IP4Event) {
-	var address = utils.IntToIP(event.Daddr).String()
+// WriteEvent adds an event to the report file
+func (r *Reporter) WriteEvent(event domain.ReportEvent) {
+	var address = event.DestinationAddress + ":" + fmt.Sprint(event.DestinationPort)
 	var hash = hash(address)
 
 	if _, ok := r.eventsHashMap[hash]; ok {
@@ -68,54 +66,23 @@ func (r *Reporter) AddEvent(event domain.IP4Event) {
 		return
 	}
 
-	r.events = append(r.events, event)
 	r.eventsHashMap[hash] = true
-}
 
-// PrintTable prints the reporter table
-func (r *Reporter) PrintTable() {
-	data := pterm.TableData{
-		{"Pid", "Comm", "Proto", "Domain", "Destination Addr", "Policy"},
-	}
-
-	for _, v := range r.events {
-		res := make([]string, 0)
-		res = append(res, strconv.FormatUint(uint64(v.Pid), 10))
-		res = append(res, v.Comm)
-		res = append(res, v.Proto)
-		res = append(res, v.Daddr)
-		//res = append(res, v.Daddr.String())
-		res = append(res, fmt.Sprintf("%s:%d", utils.IntToIP(v.Daddr).String(), v.Dport))
-		res = append(res, strconv.FormatBool(v.Policy))
-		data = append(data, res)
-	}
-
-	var tablePrinter = pterm.DefaultTable.WithHasHeader().WithRowSeparator("-").WithHeaderRowSeparator("-").WithData(data)
-
-	fmt.Println("------------------------------\n")
-
-	tablePrinter.Render()
-
-	fmt.Println("------------------------------\n")
-
-	table, err := tablePrinter.Srender()
+	eventData, err := json.MarshalIndent(event, "", "	")
 	if err != nil {
-		log.Fatalf("Failed to render table: %s", err)
+		log.Fatalf("failed to marshal: %s", err)
 	}
 
 	file, err := r.openReportFile()
 	if err != nil {
-		log.Fatalf("Failed to open file: %s", err)
+		log.Fatalf("failed to open file: %s", err)
 	}
+	defer file.Close()
 
-	_, err = file.WriteString(table)
+	_, err = file.Write(eventData)
 	if err != nil {
-		log.Fatalf("Failed writing to file: %s", err)
+		log.Fatalf("failed writing to file: %s", err)
 	}
-
-	logger.Log.Infof("report file can be found here: %s", r.outputFileName)
-
-	file.Close()
 }
 
 func (r *Reporter) openReportFile() (*os.File, error) {

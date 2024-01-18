@@ -18,7 +18,7 @@ import (
 	ebpfman "github.com/kondukto-io/kntrl/pkg/ebpf"
 	"github.com/kondukto-io/kntrl/pkg/logger"
 	"github.com/kondukto-io/kntrl/pkg/reporter.go"
-	"github.com/kondukto-io/kntrl/utils"
+	"github.com/kondukto-io/kntrl/pkg/utils"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -194,9 +194,6 @@ func Run(cmd cobra.Command) error {
 		logger.Log.Fatalf("failed to read ipv4 closed events: %s", err)
 	}
 
-	//allowedHostsAddress := []string{".github.com", ".kondukto.io"}
-
-	var event domain.IP4Event
 	for {
 		record, err := ipV4Events.Read()
 		if err != nil {
@@ -206,6 +203,7 @@ func Run(cmd cobra.Command) error {
 			logger.Log.Errorf("readig from perf event reader: %s", err)
 		}
 
+		var event domain.IP4Event
 		if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
 			logger.Log.Printf("parsing perf event: %s", err)
 			continue
@@ -218,19 +216,22 @@ func Run(cmd cobra.Command) error {
 			domainNames = append(domainNames, ".")
 		}
 
-		//for i := 0; i < len(allowedHosts); i++ {
-		//	for v := 0; v < len(domain); v++ {
-		//		if strings.Contains(domain[v], allowedHostsAddress[i]) {
-		//			ipUint32 := utils.IntToIP(event.Daddr)
-		//			if err := allowMap.Put(ipUint32, uint32(1)); err != nil {
-		//				logger.Log.Fatalf("failed to update allow list (map): %s", err)
-		//			}
-		//			logger.Log.Infof("add ---->%d", ipUint32)
-		//		}
-		//	}
-		//}
+		var policyStatus = domain.EventPolicyStatusPass
+		if tracerMode != domain.TracerModeMonitor {
+			policyStatus = policyCheck(allowMap, allowedIPS, domainNames, event.Daddr)
+		}
 
-		report.AddEvent(event)
+		var reportEvent = domain.ReportEvent{
+			ProcessID:          event.Pid,
+			TaskName:           string(event.Task[:]),
+			Protocol:           domain.EventProtocolTCP,
+			DestinationAddress: utils.IntToIP(event.Daddr).String(),
+			DestinationPort:    event.Dport,
+			Domains:            domainNames,
+			Policy:             policyStatus,
+		}
+
+		report.WriteEvent(reportEvent)
 
 		logger.Log.Infof("[%d]%s -> %s:%d (%s)",
 			event.Pid,
@@ -243,7 +244,31 @@ func Run(cmd cobra.Command) error {
 
 EXIT:
 	<-done
-	report.PrintTable()
 
 	return nil
+}
+
+func policyCheck(allowMap *ebpf.Map, allowedIPS []net.IP, domainNames []string, destinationAddress uint32) string {
+	allowedHostsAddress := []string{".github.com", ".kondukto.io"}
+
+	for _, v := range allowedIPS {
+		if v.String() == string(utils.IntToIP(destinationAddress)) {
+			return domain.EventPolicyStatusPass
+		}
+	}
+
+	for _, allowedHost := range allowedHostsAddress {
+		if utils.OneOfContains(allowedHost, domainNames) {
+			var ipUint32 = utils.IntToIP(destinationAddress)
+			if err := allowMap.Put(ipUint32, uint32(1)); err != nil {
+				logger.Log.Fatalf("failed to update allow list (map): %v", err)
+				continue
+			}
+
+			logger.Log.Infof("ip [%d] added into allowed list", ipUint32)
+			return domain.EventPolicyStatusPass
+		}
+	}
+
+	return domain.EventPolicyStatusBlock
 }
