@@ -16,4 +16,4 @@ generate:
 build:
 	go build -o main .
 clean:
-	rm main ./kntrl/bpf_bpfel_x86.o ./kntrl/bpf_bpfel_x86.go 
+	rm main ./internal/handlers/tracer/bpf_bpfel_x86.o ./internal/handlers/tracer/bpf_bpfel_x86.go
