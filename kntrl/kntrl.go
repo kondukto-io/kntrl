@@ -17,7 +17,7 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/sirupsen/logrus"
 
-	"github.com/kondukto-io/kntrl/logger"
+	"github.com/kondukto-io/kntrl/pkg/logger"
 	"github.com/kondukto-io/kntrl/utils"
 )
 
@@ -41,7 +41,7 @@ func Run(mode uint32, hosts []net.IP) error {
 	r := NewReporter()
 
 	if !utils.IsRoot() {
-		return errors.New("you need root privileges to run this program!")
+		return errors.New("you need root privileges to run this program")
 	}
 
 	// allocate memory
@@ -252,6 +252,6 @@ type IP4Event struct {
 	Event
 	Daddr uint32
 	Dport uint16
-	//Saddr uint32
-	//Sport uint16
+	// Saddr uint32
+	// Sport uint16
 }
