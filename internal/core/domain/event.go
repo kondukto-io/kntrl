@@ -13,6 +13,6 @@ type IP4Event struct {
 	Event
 	Daddr uint32
 	Dport uint16
-	//Saddr uint32
-	//Sport uint16
+	// Saddr uint32
+	// Sport uint16
 }

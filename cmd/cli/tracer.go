@@ -18,6 +18,7 @@ func initTracerCommand() *cobra.Command {
 
 	tracerCMD.Flags().String("mode", "monitor", "trace || monitor")
 	tracerCMD.Flags().String("hosts", "", "enter ip or hostname (192.168.0.100, example.com, .github.com)")
+	tracerCMD.Flags().StringP("output-file-name", "o", "/tmp/kntrl.out", "output file name")
 
 	return tracerCMD
 }

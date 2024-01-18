@@ -109,11 +109,6 @@ func Run(cmd cobra.Command) error {
 
 	defer ipV4ClosedEvent.Close()
 
-	r := reporter.NewReporter()
-	if r.Err != nil {
-		logger.Log.Fatalf("failed to read ipv4 closed events: %s", err)
-	}
-
 	// allocate memory
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return err
@@ -192,6 +187,13 @@ func Run(cmd cobra.Command) error {
 		}
 	}()
 
+	var outputDir = cmd.Flag("output-file-name").Value.String()
+
+	report := reporter.NewReporter(outputDir)
+	if report.Err != nil {
+		logger.Log.Fatalf("failed to read ipv4 closed events: %s", err)
+	}
+
 	//allowedHostsAddress := []string{".github.com", ".kondukto.io"}
 
 	var event domain.IP4Event
@@ -209,10 +211,11 @@ func Run(cmd cobra.Command) error {
 			continue
 		}
 
-		daddr := utils.IntToIP(event.Daddr)
-		domain, err := net.LookupAddr(daddr.String())
+		domainAddress := utils.IntToIP(event.Daddr)
+		domainNames, err := net.LookupAddr(domainAddress.String())
 		if err != nil {
-			domain = append(domain, ".")
+			logger.Log.Debugf("failed to lookup domain: [%s] %v", domainAddress.String(), err)
+			domainNames = append(domainNames, ".")
 		}
 
 		//for i := 0; i < len(allowedHosts); i++ {
@@ -227,22 +230,20 @@ func Run(cmd cobra.Command) error {
 		//	}
 		//}
 
+		report.AddEvent(event)
+
 		logger.Log.Infof("[%d]%s -> %s:%d (%s)",
 			event.Pid,
 			event.Task,
 			utils.IntToIP(event.Daddr),
 			event.Dport,
-			domain,
+			domainNames,
 		)
 	}
 
 EXIT:
 	<-done
-	fmt.Println("----")
-	fmt.Println()
-	r.Print()
-	r.Clean()
-	fmt.Println("----")
+	report.PrintTable()
 
 	return nil
 }
