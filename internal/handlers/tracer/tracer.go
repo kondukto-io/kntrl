@@ -229,8 +229,7 @@ func Run(cmd cobra.Command) error {
 		}
 
 		var reportEvent = domain.ReportEvent{
-			ProcessID: event.Pid,
-			//TaskName:           string(event.Task[:]),
+			ProcessID:          event.Pid,
 			TaskName:           utils.XTrim(event.Task),
 			Protocol:           domain.EventProtocolTCP,
 			DestinationAddress: utils.IntToIP(event.Daddr).String(),

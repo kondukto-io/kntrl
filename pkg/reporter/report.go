@@ -8,6 +8,9 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+
+	"github.com/pterm/pterm"
 
 	"github.com/kondukto-io/kntrl/internal/core/domain"
 	"github.com/kondukto-io/kntrl/pkg/logger"
@@ -47,6 +50,8 @@ func NewReporter(outputFileName string) *Reporter {
 
 // WriteEvent adds an event to the report file
 func (r *Reporter) WriteEvent(event domain.ReportEvent) {
+	r.events = append(r.events, event)
+
 	var address = event.DestinationAddress + ":" + fmt.Sprint(event.DestinationPort)
 	var hash = hash(address)
 
@@ -71,6 +76,7 @@ func (r *Reporter) WriteEvent(event domain.ReportEvent) {
 
 // Close closes the report file
 func (r *Reporter) Close() {
+	r.printReportTable()
 	if err := r.file.Close(); err != nil {
 		log.Fatalf("failed to close file: %v", err)
 	}
@@ -94,6 +100,26 @@ func (r *Reporter) openReportFile() (*os.File, error) {
 	}
 
 	return file, nil
+}
+
+func (r *Reporter) printReportTable() {
+	fmt.Println("\n")
+	data := pterm.TableData{
+		{"Pid", "Comm", "Proto", "Domain", "Destination Addr", "Policy"},
+	}
+
+	for _, v := range r.events {
+		res := make([]string, 0)
+		res = append(res, strconv.FormatUint(uint64(v.ProcessID), 10))
+		res = append(res, v.TaskName)
+		res = append(res, v.Protocol)
+		res = append(res, v.Domains...)
+		res = append(res, fmt.Sprintf("%s:%d", v.DestinationAddress, v.DestinationPort))
+		res = append(res, v.Policy)
+		data = append(data, res)
+	}
+
+	pterm.DefaultTable.WithHasHeader().WithRowSeparator("-").WithHeaderRowSeparator("-").WithData(data).Render()
 }
 
 func hash(text string) string {
