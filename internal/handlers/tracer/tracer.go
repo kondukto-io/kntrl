@@ -57,7 +57,9 @@ func Run(cmd cobra.Command) error {
 	}
 
 	ebpfClient := ebpfman.New()
-	ebpfClient.Load(prog)
+	if err := ebpfClient.Load(prog); err != nil {
+		logger.Log.Fatalf("failed to load ebpf program: %s", err)
+	}
 
 	defer ebpfClient.Clean()
 
