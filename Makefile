@@ -1,5 +1,6 @@
 CLANG ?= clang
 CFLAGS ?= -O2 -g -Wall -Werror 
+GOARCH ?= amd64
 
 #LIBEBPF_TOP = /home/cx/go/src/github.com/ebpf
 LIBEBPF_TOP = /home/cx/go/src/github.com/kondukto-io/kntrl/
