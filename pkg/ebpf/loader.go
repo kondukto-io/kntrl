@@ -1,6 +1,7 @@
 package ebpfman
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/cilium/ebpf"
@@ -8,9 +9,14 @@ import (
 )
 
 // Load loads the EBPF collection
-func (e *EBPF) Load(collection string) error {
+// func (e *EBPF) Load(collection string) error {
+func (e *EBPF) Load(collection []byte) error {
 	var err error
-	e.Spec, err = ebpf.LoadCollectionSpec(collection)
+
+	rd := bytes.NewReader(collection)
+
+	//e.Spec, err = ebpf.LoadCollectionSpec(collection)
+	e.Spec, err = ebpf.LoadCollectionSpecFromReader(rd)
 	if err != nil {
 		logger.Log.Fatalf("failed to loading collection spec: %v", err)
 		return fmt.Errorf("failed to loading collection spec: %v", err)

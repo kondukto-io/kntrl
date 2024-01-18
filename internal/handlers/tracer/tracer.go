@@ -2,6 +2,7 @@ package tracer
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -14,17 +15,23 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
+
 	"github.com/kondukto-io/kntrl/internal/core/domain"
 	ebpfman "github.com/kondukto-io/kntrl/pkg/ebpf"
 	"github.com/kondukto-io/kntrl/pkg/logger"
 	"github.com/kondukto-io/kntrl/pkg/reporter"
 	"github.com/kondukto-io/kntrl/pkg/utils"
-	"github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
+)
+
+var (
+	//go:embed bpf_bpfel_x86.o
+	prog []byte
 )
 
 const (
-	prog       = "./internal/handlers/tracer/bpf_bpfel_x86.o"
+	//prog       = "./internal/handlers/tracer/bpf_bpfel_x86.o"
 	rootCgroup = "/sys/fs/cgroup"
 )
 
