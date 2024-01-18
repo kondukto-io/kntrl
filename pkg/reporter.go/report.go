@@ -64,7 +64,7 @@ func (r *Reporter) AddEvent(event domain.IP4Event) {
 	var hash = hash(address)
 
 	if _, ok := r.eventsHashMap[hash]; ok {
-		logger.Log.Debugf("event with address [%s] already exists")
+		logger.Log.Debugf("event with address [%s] already exists", address)
 		return
 	}
 
