@@ -17,7 +17,7 @@ import (
 	"github.com/kondukto-io/kntrl/internal/core/domain"
 	ebpfman "github.com/kondukto-io/kntrl/pkg/ebpf"
 	"github.com/kondukto-io/kntrl/pkg/logger"
-	"github.com/kondukto-io/kntrl/pkg/reporter.go"
+	"github.com/kondukto-io/kntrl/pkg/reporter"
 	"github.com/kondukto-io/kntrl/pkg/utils"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -260,6 +260,7 @@ func policyCheck(allowMap *ebpf.Map, allowedIPS []net.IP, domainNames []string, 
 	for _, allowedHost := range allowedHostsAddress {
 		if utils.OneOfContains(allowedHost, domainNames) {
 			var ipUint32 = utils.IntToIP(destinationAddress)
+
 			if err := allowMap.Put(ipUint32, uint32(1)); err != nil {
 				logger.Log.Fatalf("failed to update allow list (map): %v", err)
 				continue

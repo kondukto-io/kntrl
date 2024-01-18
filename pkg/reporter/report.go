@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"os"
+	"path/filepath"
 
 	"github.com/kondukto-io/kntrl/internal/core/domain"
 	"github.com/kondukto-io/kntrl/pkg/logger"
@@ -19,28 +19,17 @@ type Reporter struct {
 	eventsHashMap  map[string]bool
 	Err            error
 	outputFileName string
-}
-
-type event struct {
-	Pid    uint32
-	Comm   string
-	Sport  uint16
-	Dport  uint16
-	Saddr  net.IP
-	Daddr  net.IP
-	Domain []string
-	Proto  string
-	Policy bool
+	file           *os.File
 }
 
 // NewReporter returns a new reporter
-func NewReporter(outputFileName string) Reporter {
+func NewReporter(outputFileName string) *Reporter {
 	if outputFileName == "" {
 		outputFileName = "/tmp/kntrl.out"
 		logger.Log.Debugf("using the default output file: %s", outputFileName)
 	}
 
-	var report = Reporter{
+	var report = &Reporter{
 		eventsHashMap:  make(map[string]bool, 0),
 		outputFileName: outputFileName,
 	}
@@ -51,7 +40,7 @@ func NewReporter(outputFileName string) Reporter {
 		return report
 	}
 
-	file.Close()
+	report.file = file
 
 	return report
 }
@@ -68,31 +57,37 @@ func (r *Reporter) WriteEvent(event domain.ReportEvent) {
 
 	r.eventsHashMap[hash] = true
 
-	eventData, err := json.MarshalIndent(event, "", "	")
+	eventData, err := json.Marshal(event)
 	if err != nil {
-		log.Fatalf("failed to marshal: %s", err)
+		log.Fatalf("failed to marshal: %v", err)
 	}
 
-	file, err := r.openReportFile()
+	println(string(eventData))
+	_, err = r.file.WriteString(string(eventData) + "\n")
 	if err != nil {
-		log.Fatalf("failed to open file: %s", err)
+		log.Fatalf("failed to write an event to file: %s %v", r.file.Name(), err)
 	}
-	defer file.Close()
+}
 
-	_, err = file.Write(eventData)
-	if err != nil {
-		log.Fatalf("failed writing to file: %s", err)
+// Close closes the report file
+func (r *Reporter) Close() {
+	if err := r.file.Close(); err != nil {
+		log.Fatalf("failed to close file: %v", err)
 	}
 }
 
 func (r *Reporter) openReportFile() (*os.File, error) {
-	file, err := os.Open(r.outputFileName)
+	file, err := os.OpenFile(r.outputFileName, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return nil, fmt.Errorf("failed to stat output file: %w", err)
 		}
 
-		_, err := os.Create(r.outputFileName)
+		if err := os.MkdirAll(filepath.Dir(r.outputFileName), os.ModePerm); err != nil && !os.IsExist(err) {
+			return nil, fmt.Errorf("failed to create output directory: %w", err)
+		}
+
+		file, err = os.Create(r.outputFileName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create output file: %w", err)
 		}
