@@ -31,7 +31,7 @@ const (
 
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
 //
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target=arm64  -cc $BPF_CLANG -cflags $BPF_CFLAGS bpf ../../../bpf/bpf.c -- -I $BPF_HEADERS
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target=amd64  -cc $BPF_CLANG -cflags $BPF_CFLAGS bpf ../../../bpf/bpf.c -- -I $BPF_HEADERS
 func Run(cmd cobra.Command) error {
 	var tracerMode = cmd.Flag("mode").Value.String()
 	if tracerMode == "" {
