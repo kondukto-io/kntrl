@@ -44,12 +44,12 @@ func Run(cmd cobra.Command) error {
 
 	var allowedHosts = cmd.Flag("hosts").Value.String()
 	if allowedHosts == "" {
-		logger.Log.Debugf("no provided allowed hosts")
+		logger.Log.Debugf("no host provided allowed")
 	}
 
 	allowedIPS, err := utils.ParseHosts(allowedHosts)
 	if err != nil {
-		return fmt.Errorf("failed to parse allowed hosts: %s", err)
+		return fmt.Errorf("failed to parse allowed hosts: %w", err)
 	}
 
 	if !utils.IsRoot() {
@@ -58,7 +58,7 @@ func Run(cmd cobra.Command) error {
 
 	var ebpfClient = ebpfman.New()
 	if err := ebpfClient.Load(prog); err != nil {
-		return fmt.Errorf("failed to load ebpf program: %s", err)
+		return fmt.Errorf("failed to load ebpf program: %w", err)
 	}
 
 	defer ebpfClient.Clean()
@@ -89,14 +89,14 @@ func Run(cmd cobra.Command) error {
 		ipUint32 := binary.LittleEndian.Uint32(ip)
 		if err := allowMap.Put(ipUint32, uint32(1)); err != nil {
 			// if err := allowMap.Put(uint32(key), ipUint32); err != nil {
-			logger.Log.Fatalf("failed to update allow list (map): %s", err)
+			logger.Log.Fatalf("failed to update allow list (map): %v", err)
 		}
 	}
 
 	ipv4EventMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapIPV4Events]
 	ipV4Events, err := perf.NewReader(ipv4EventMap, 4096)
 	if err != nil {
-		logger.Log.Fatalf("failed to read ipv4 events: %s", err)
+		logger.Log.Fatalf("failed to read ipv4 events: %v", err)
 	}
 
 	defer ipV4Events.Close()
@@ -104,7 +104,7 @@ func Run(cmd cobra.Command) error {
 	ipv4ClosedMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapIPV4ClosedEvents]
 	ipV4ClosedEvent, err := perf.NewReader(ipv4ClosedMap, 4096)
 	if err != nil {
-		logger.Log.Fatalf("failed to read ipv4 closed events: %s", err)
+		logger.Log.Fatalf("failed to read ipv4 closed events: %v", err)
 	}
 
 	defer ipV4ClosedEvent.Close()
@@ -200,12 +200,13 @@ func Run(cmd cobra.Command) error {
 			if errors.Is(err, perf.ErrClosed) {
 				goto EXIT
 			}
-			logger.Log.Errorf("readig from perf event reader: %s", err)
+			logger.Log.Errorf("failed to read perf event: %v", err)
+			continue
 		}
 
 		var event domain.IP4Event
 		if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
-			logger.Log.Printf("parsing perf event: %s", err)
+			logger.Log.Printf("failed to parse perf event: %b", err)
 			continue
 		}
 
@@ -244,7 +245,7 @@ func Run(cmd cobra.Command) error {
 
 EXIT:
 	<-done
-
+	report.Close()
 	return nil
 }
 
