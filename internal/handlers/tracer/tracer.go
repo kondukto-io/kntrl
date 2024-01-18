@@ -28,6 +28,7 @@ const (
 	rootCgroup = "/sys/fs/cgroup"
 )
 
+// Run runs the tracer
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
 //
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target=$GOARCH  -cc $BPF_CLANG -cflags $BPF_CFLAGS bpf ../../../bpf/bpf.c -- -I $BPF_HEADERS
@@ -55,9 +56,9 @@ func Run(cmd cobra.Command) error {
 		return errors.New("you need root privileges to run this program")
 	}
 
-	ebpfClient := ebpfman.New()
+	var ebpfClient = ebpfman.New()
 	if err := ebpfClient.Load(prog); err != nil {
-		logger.Log.Fatalf("failed to load ebpf program: %s", err)
+		return fmt.Errorf("failed to load ebpf program: %s", err)
 	}
 
 	defer ebpfClient.Clean()
