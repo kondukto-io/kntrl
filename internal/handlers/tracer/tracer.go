@@ -151,7 +151,7 @@ func Run(cmd cobra.Command) error {
 
 		case ebpf.TracePoint:
 			logger.Log.Infof("linking tracepoint [%s]", utils.ParseProgramName(prg))
-			l, err := link.Tracepoint("syscalls", "sys_enter_connect", prg, nil)
+			l, err := link.Tracepoint("sock", "inet_sock_set_state", prg, nil)
 			if err != nil {
 				return err
 			}
@@ -229,6 +229,7 @@ func Run(cmd cobra.Command) error {
 		}
 
 		taskname := utils.XTrim(event.Task)
+
 		var reportEvent = domain.ReportEvent{
 			ProcessID:          event.Pid,
 			TaskName:           taskname,
@@ -261,6 +262,16 @@ EXIT:
 func policyCheck(allowMap *ebpf.Map, allowedIPS []net.IP, domainNames []string, destinationAddress uint32) string {
 	allowedHostsAddress := []string{".github.com", ".kondukto.io"}
 
+	if isInLocalRange(destinationAddress) {
+
+		var ipUint32 = utils.IntToIP(destinationAddress)
+		if err := allowMap.Put(ipUint32, uint32(1)); err != nil {
+			logger.Log.Fatalf("failed to update allow list (map): %v", err)
+		}
+		logger.Log.Infof("ip [%d] in local range", ipUint32)
+		return domain.EventPolicyStatusPass
+	}
+
 	for _, v := range allowedIPS {
 		if v.To4().Equal(utils.IntToIP(destinationAddress)) {
 			return domain.EventPolicyStatusPass
@@ -282,4 +293,21 @@ func policyCheck(allowMap *ebpf.Map, allowedIPS []net.IP, domainNames []string, 
 	}
 
 	return domain.EventPolicyStatusBlock
+}
+
+func isInLocalRange(daddr uint32) bool {
+	ip := utils.IntToIP(daddr)
+
+	for _, r := range utils.AllowedRanges {
+		_, cidr, err := net.ParseCIDR(r)
+		if err != nil {
+			continue
+		}
+		if cidr.Contains(ip) == true {
+			return true
+		}
+		continue
+	}
+
+	return false
 }

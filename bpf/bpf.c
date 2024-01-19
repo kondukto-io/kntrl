@@ -6,6 +6,7 @@
 #include "headers/common.h"
 #include "headers/tcp.h"
 #include "headers/bpf_helpers.h"
+#include "headers/bpf_core_read.h"
 #include "headers/bpf_endian.h"
 #include "headers/bpf_tracing.h"
 
@@ -37,6 +38,18 @@ struct ipv4_event_t {
     u32 daddr;
     u16 dport;
 } __attribute__((packed));
+
+struct tcp_event
+{
+  __u64 fd;
+  __u64 timestamp;
+  __u32 type;
+  __u32 pid;
+  __u16 sport;
+  __u16 dport;
+  __u8 saddr[16];
+  __u8 daddr[16];
+};
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
@@ -83,37 +96,43 @@ int kprobe__tcp_v4_connect(struct pt_regs *ctx) {
 	return 0;
 }
 
-SEC("kprobe/tcp_close")
-int kprobe__tcp_close(struct pt_regs *ctx) {
-	struct sockaddr *address = (struct sockaddr *)PT_REGS_PARM2(ctx);
-	if (!address) {
+inline __u32 u8ToU32(__u8 ipU8[4]) {
+    // Convert the u8 IP address to u32 using bitwise operations
+    __u32 ipU32 = (ipU8[0] << 24) | (ipU8[1] << 16) | (ipU8[2] << 8) | ipU8[3];
+
+    return ipU32;
+}
+
+SEC("tracepoint/sock/inet_sock_set_state")
+int inet_sock_set_state(void *ctx) {
+  	struct trace_event_raw_inet_sock_set_state args = {};
+  	if (bpf_core_read(&args, sizeof(args), ctx) < 0) {
+		return 0;
+  	}
+
+	// if not tcp protocol, ignore
+	if (BPF_CORE_READ(&args, protocol) != 6) {
 		return 0;
 	}
 
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u16 address_family = 0;
-	bpf_probe_read(&address_family, sizeof(address_family), &address->sa_family);
+	int oldstate;
+	int newstate;
 
-	if (address_family == AF_INET) {
-		struct ipv4_event_t evt4 = { .pid = pid, .af = address_family };
-		evt4.ts_us = bpf_ktime_get_ns() / 1000;
+	oldstate = BPF_CORE_READ(&args, oldstate);
+	newstate = BPF_CORE_READ(&args, newstate);
 
-		struct sockaddr_in *daddr = (struct sockaddr_in *)address;
+	u8 daddr[16];
+	__builtin_memcpy(&daddr, &args.daddr, sizeof(daddr));
 
-		bpf_probe_read(&evt4.daddr, sizeof(evt4.daddr), &daddr->sin_addr.s_addr);
+	__u32 val = 0;
+	__be32 *p32;
+	p32 = (__be32 *)daddr;
+	bpf_printk("tracepoint:=%d oldstate=%d newstate=%d daddr=%pI4", pid, oldstate, newstate, p32);
 
-		u16 dport = 0;
-	    	bpf_probe_read(&dport, sizeof(dport), &daddr->sin_port);
-		evt4.dport = bpf_ntohs(dport);
-
-		bpf_get_current_comm(&evt4.task, TASK_COMM_LEN);
-
-		if (evt4.dport != 0) {
-	            bpf_perf_event_output(ctx, &ipv4_closed_events, BPF_F_CURRENT_CPU, &evt4, sizeof(evt4));
-		}
+	if (oldstate == 1) {
+		bpf_map_update_elem(&allow_map, &daddr, &val, BPF_ANY);
 	}
-
-	bpf_printk("kprobe:tcp_closed=%d", pid);
 
 	return 0;
 }
@@ -126,7 +145,15 @@ inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 	// load packet header
 	bpf_skb_load_bytes(skb, 0, &iph, sizeof(struct iphdr));
 
-	if (iph.version == 4) {
+	// pass all UDP traffic for now
+	if (iph.protocol == 17 || iph.version == 6) {
+		//bpf_printk("cgroup_skb/egress=%pI4 proto=%d [pass]", iph.daddr, iph.protocol);
+		return 1;
+	}
+
+	//bpf_printk("cgroup_skb/egress=%pI4 proto=%d", &iph.daddr, iph.protocol);
+
+	if ((iph.version == 4) && (iph.protocol == 6)){
 		bool pass = bpf_map_lookup_elem(&allow_map, &iph.saddr) || bpf_map_lookup_elem(&allow_map, &iph.daddr);
 
 		__u32 key = 0;
