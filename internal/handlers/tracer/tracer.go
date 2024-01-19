@@ -252,6 +252,7 @@ func Run(cmd cobra.Command) error {
 
 EXIT:
 	<-done
+	report.PrintReportTable()
 	report.Close()
 	return nil
 }

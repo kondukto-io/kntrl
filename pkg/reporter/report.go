@@ -75,7 +75,6 @@ func (r *Reporter) WriteEvent(event domain.ReportEvent) {
 
 // Close closes the report file
 func (r *Reporter) Close() {
-	r.printReportTable()
 	if err := r.file.Close(); err != nil {
 		log.Fatalf("failed to close file: %v", err)
 	}
@@ -101,7 +100,7 @@ func (r *Reporter) openReportFile() (*os.File, error) {
 	return file, nil
 }
 
-func (r *Reporter) printReportTable() {
+func (r *Reporter) PrintReportTable() {
 	fmt.Print("\n\n")
 	data := pterm.TableData{
 		{"Pid", "Comm", "Proto", "Domain", "Destination Addr", "Policy"},

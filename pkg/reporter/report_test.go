@@ -74,5 +74,6 @@ func TestReporter_WriteEvent(t *testing.T) {
 		report.WriteEvent(c.event)
 	}
 
+	report.PrintReportTable()
 	report.Close()
 }
