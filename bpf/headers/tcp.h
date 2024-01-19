@@ -115,3 +115,7 @@ struct trace_event_sys_enter_connect
 #define EVENT_TCP_LISTEN	3
 #define EVENT_TCP_LISTEN_CLOSED	4
 #define EVENT_TCP_CLOSED	5
+
+#define IPPROTO_TCP             6               /* Transmission Control Protocol    */
+#define IPPROTO_UDP             17              /* User Datagram Protocol        */
+

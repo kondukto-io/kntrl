@@ -39,18 +39,6 @@ struct ipv4_event_t {
     u16 dport;
 } __attribute__((packed));
 
-struct tcp_event
-{
-  __u64 fd;
-  __u64 timestamp;
-  __u32 type;
-  __u32 pid;
-  __u16 sport;
-  __u16 dport;
-  __u8 saddr[16];
-  __u8 daddr[16];
-};
-
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
 } ipv4_events SEC(".maps");
@@ -96,13 +84,6 @@ int kprobe__tcp_v4_connect(struct pt_regs *ctx) {
 	return 0;
 }
 
-inline __u32 u8ToU32(__u8 ipU8[4]) {
-    // Convert the u8 IP address to u32 using bitwise operations
-    __u32 ipU32 = (ipU8[0] << 24) | (ipU8[1] << 16) | (ipU8[2] << 8) | ipU8[3];
-
-    return ipU32;
-}
-
 SEC("tracepoint/sock/inet_sock_set_state")
 int inet_sock_set_state(void *ctx) {
   	struct trace_event_raw_inet_sock_set_state args = {};
@@ -111,7 +92,7 @@ int inet_sock_set_state(void *ctx) {
   	}
 
 	// if not tcp protocol, ignore
-	if (BPF_CORE_READ(&args, protocol) != 6) {
+	if (BPF_CORE_READ(&args, protocol) != IPPROTO_TCP) {
 		return 0;
 	}
 
@@ -130,7 +111,7 @@ int inet_sock_set_state(void *ctx) {
 	p32 = (__be32 *)daddr;
 	bpf_printk("tracepoint:=%d oldstate=%d newstate=%d daddr=%pI4", pid, oldstate, newstate, p32);
 
-	if (oldstate == 1) {
+	if (oldstate == EVENT_TCP_ESTABLISHED) {
 		bpf_map_update_elem(&allow_map, &daddr, &val, BPF_ANY);
 	}
 
@@ -146,14 +127,13 @@ inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 	bpf_skb_load_bytes(skb, 0, &iph, sizeof(struct iphdr));
 
 	// pass all UDP traffic for now
-	if (iph.protocol == 17 || iph.version == 6) {
+	if (iph.protocol == IPPROTO_UDP) {
 		//bpf_printk("cgroup_skb/egress=%pI4 proto=%d [pass]", iph.daddr, iph.protocol);
 		return 1;
 	}
 
-	//bpf_printk("cgroup_skb/egress=%pI4 proto=%d", &iph.daddr, iph.protocol);
 
-	if ((iph.version == 4) && (iph.protocol == 6)){
+	if ((iph.version == 4) && (iph.protocol == IPPROTO_TCP)){
 		bool pass = bpf_map_lookup_elem(&allow_map, &iph.saddr) || bpf_map_lookup_elem(&allow_map, &iph.daddr);
 
 		__u32 key = 0;
