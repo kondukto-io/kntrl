@@ -1,5 +1,6 @@
 CLANG ?= clang
 CFLAGS ?= -O2 -g -Wall -Werror 
+GOARCH ?= amd64
 
 #LIBEBPF_TOP = /home/cx/go/src/github.com/ebpf
 LIBEBPF_TOP = /home/cx/go/src/github.com/kondukto-io/kntrl/
@@ -14,6 +15,6 @@ generate: export BPF_HEADERS=$(EXAMPLES_HEADERS)
 generate:
 	go generate ./...
 build:
-	go build -o main .
+	go build -o kntrl .
 clean:
-	rm main ./kntrl/bpf_bpfel_x86.o ./kntrl/bpf_bpfel_x86.go 
+	rm kntrl ./internal/handlers/tracer/bpf_bpfel_x86.o ./internal/handlers/tracer/bpf_bpfel_x86.go

@@ -26,10 +26,19 @@ func IsRoot() bool {
 // ParseHosts function parses the given hosts (or IP addresses)
 // runs a lookup function, validates and ignores IPv6
 func ParseHosts(ips string) ([]net.IP, error) {
+	allowedIPAddress := []string{
+		"127.0.0.1",
+		"169.254.169.254",
+		"20.102.39.57",
+		"140.82.112.21",
+		"52.239.172.36",
+	}
+
 	var retval []net.IP
 	for _, ip := range func(ips string) []string {
 		i := strings.Split(ips, ",")
 		i = append(i, getDNSServers()...)
+		i = append(i, allowedIPAddress...)
 		return i
 	}(ips) {
 		if i := net.ParseIP(ip); i == nil {

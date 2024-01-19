@@ -13,11 +13,11 @@ WORKDIR /kntrl-build
 COPY . .
 # Build kntrl as a binary
 RUN make
-RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o binary main.go
+#RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o binary main.go
 # Stage 2:
 # Run kntrl binary in the latest golang image
 FROM golang:latest
 WORKDIR /
-COPY --from=build kntrl-build/binary kntrl-binary
-COPY --from=build kntrl-build/kntrl/ kntrl/
-ENTRYPOINT ["./kntrl-binary"]
+COPY --from=build kntrl-build/kntrl kntrl
+#COPY --from=build kntrl-build/kntrl/ kntrl/
+ENTRYPOINT ["./kntrl"]
