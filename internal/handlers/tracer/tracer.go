@@ -228,9 +228,10 @@ func Run(cmd cobra.Command) error {
 			policyStatus = policyCheck(allowMap, allowedIPS, domainNames, event.Daddr)
 		}
 
+		taskname := utils.XTrim(event.Task)
 		var reportEvent = domain.ReportEvent{
 			ProcessID:          event.Pid,
-			TaskName:           utils.XTrim(event.Task),
+			TaskName:           taskname,
 			Protocol:           domain.EventProtocolTCP,
 			DestinationAddress: utils.IntToIP(event.Daddr).String(),
 			DestinationPort:    event.Dport,
@@ -242,7 +243,7 @@ func Run(cmd cobra.Command) error {
 
 		logger.Log.Infof("[%d]%s -> %s:%d (%s) | %s",
 			event.Pid,
-			event.Task,
+			taskname,
 			utils.IntToIP(event.Daddr),
 			event.Dport,
 			domainNames,
