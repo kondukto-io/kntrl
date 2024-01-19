@@ -15,6 +15,6 @@ generate: export BPF_HEADERS=$(EXAMPLES_HEADERS)
 generate:
 	go generate ./...
 build:
-	go build -o main .
+	go build -o kntrl .
 clean:
-	rm main ./internal/handlers/tracer/bpf_bpfel_x86.o ./internal/handlers/tracer/bpf_bpfel_x86.go
+	rm kntrl ./internal/handlers/tracer/bpf_bpfel_x86.o ./internal/handlers/tracer/bpf_bpfel_x86.go
