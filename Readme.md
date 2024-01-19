@@ -1,6 +1,8 @@
 # Monitor and prevent threats in your pipeline
 
-kntrl is a runtime agent that monitors and prevents anomalous behaviour defined by you on your pipeline using eBPF. kntrl achieves this by monitoring kernel calls, and denying access as soon as your defined behaviour is detected.
+kntrl is an eBPF based runtime agent that monitors and prevents anomalous behaviour defined by you on your pipeline using eBPF. kntrl achieves this by monitoring kernel calls, and denying access as soon as your defined behaviour is detected.
+
+It can work as a single binary (`kntrl`) or with a docker runner (`docker.io/kondukto/kntrl:0.1.0`)
 
 ## Using kntrl
 
@@ -8,14 +10,20 @@ You can start using kntrl by adding docker command or kntrl binary to your pipel
 
 ```yaml
 - name: kntrl agent
-  run: sudo docker run --privileged --pid=host --network=host --cgroupns=host --volume=/sys/kernel/debug:/sys/kernel/debug:ro --volume /tmp:/tmp --volume /etc/resolv.conf:/etc/resolv.conf --rm docker.io/kondukto/kntrl:0.0 run --mode=trace --hosts=kondukto.io,download.kondukto.io --level=debug
+  run: sudo ./kntrl run --mode=monitor --hosts=download.kondukto.io,${{ env.GITHUB_ACTIONS_URL }} 
 ```
 
-OR
+OR with the docker:
 
 ```yaml
 - name: kntrl agent
-  run: sudo ./kntrl run --mode=monitor --hosts=kondukto.io,download.kondukto.io,${{ env.GITHUB_ACTIONS_URL }}--level=debug
+  run: sudo docker run --privileged \
+    --pid=host \
+    --network=host \
+    --cgroupns=host \
+    --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
+    --volume /tmp:/tmp \
+    --rm docker.io/kondukto/kntrl:0.1.0 run --mode=trace --hosts=kondukto.io,download.kondukto.io 
 ```
 
 This action will deploy kntrl into any GitHub Actions build.
