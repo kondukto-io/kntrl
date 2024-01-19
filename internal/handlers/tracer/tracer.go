@@ -259,7 +259,8 @@ func policyCheck(allowMap *ebpf.Map, allowedIPS []net.IP, domainNames []string, 
 	allowedHostsAddress := []string{".github.com", ".kondukto.io"}
 
 	for _, v := range allowedIPS {
-		if v.String() == string(utils.IntToIP(destinationAddress)) {
+		if v.To4().Equal(utils.IntToIP(destinationAddress)) {
+			//if v.String() == string(utils.IntToIP(destinationAddress)) {
 			return domain.EventPolicyStatusPass
 		}
 	}
