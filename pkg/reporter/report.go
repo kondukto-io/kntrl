@@ -66,7 +66,7 @@ func (r *Reporter) WriteEvent(event domain.ReportEvent) {
 		log.Fatalf("failed to marshal: %v", err)
 	}
 
-	println(string(eventData))
+	//println(string(eventData)) //
 	_, err = r.file.WriteString(string(eventData) + "\n")
 	if err != nil {
 		log.Fatalf("failed to write an event to file: %s %v", r.file.Name(), err)

@@ -15,7 +15,6 @@ func (e *EBPF) Load(collection []byte) error {
 
 	rd := bytes.NewReader(collection)
 
-	//e.Spec, err = ebpf.LoadCollectionSpec(collection)
 	e.Spec, err = ebpf.LoadCollectionSpecFromReader(rd)
 	if err != nil {
 		logger.Log.Fatalf("failed to loading collection spec: %v", err)

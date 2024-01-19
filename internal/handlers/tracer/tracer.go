@@ -240,12 +240,13 @@ func Run(cmd cobra.Command) error {
 
 		report.WriteEvent(reportEvent)
 
-		logger.Log.Infof("[%d]%s -> %s:%d (%s)",
+		logger.Log.Infof("[%d]%s -> %s:%d (%s) | %s",
 			event.Pid,
 			event.Task,
 			utils.IntToIP(event.Daddr),
 			event.Dport,
 			domainNames,
+			policyStatus,
 		)
 	}
 
@@ -260,7 +261,6 @@ func policyCheck(allowMap *ebpf.Map, allowedIPS []net.IP, domainNames []string, 
 
 	for _, v := range allowedIPS {
 		if v.To4().Equal(utils.IntToIP(destinationAddress)) {
-			//if v.String() == string(utils.IntToIP(destinationAddress)) {
 			return domain.EventPolicyStatusPass
 		}
 	}
