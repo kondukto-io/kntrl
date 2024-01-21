@@ -132,7 +132,6 @@ inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 		return 1;
 	}
 
-
 	if ((iph.version == 4) && (iph.protocol == IPPROTO_TCP)){
 		bool pass = bpf_map_lookup_elem(&allow_map, &iph.saddr) || bpf_map_lookup_elem(&allow_map, &iph.daddr);
 
@@ -156,7 +155,6 @@ inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 SEC("cgroup_skb/egress")
 int egress(struct __sk_buff *skb) {
 	return (int)handle_pkt(skb, true);
-	//return (int)handle_pkt2(skb, true);
 }
 
 char __license[] SEC("license") = "GPL";
