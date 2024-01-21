@@ -6,7 +6,7 @@ It can work as a single binary (`kntrl`) or with a docker runner (`docker.io/kon
 
 ## Using kntrl
 
-You can start using kntrl by adding docker command or kntrl binary to your pipeline with the following;
+You can start using kntrl agent by simply running the following command:
 
 ```yaml
 - name: kntrl agent
@@ -29,6 +29,26 @@ OR with the docker:
 This action will deploy kntrl into any GitHub Actions build.
 
 ## Usage
+The `kntrl` agent is self explanatory and it comes with a help command. Simply run `--help` flag after each command/subcommand.
+
+```
+ ./kntrl --help
+Runtime security tool to control and monitor egress/ingress traffic in CI/CD runners
+
+Usage:
+  tracer [command]
+
+Available Commands:
+  completion  Generate the autocompletion script for the specified shell
+  help        Help about any command
+  run         Starts the TCP/UDP tracer
+
+Flags:
+  -h, --help      help for tracer
+  -v, --verbose   more logs
+
+Use "tracer [command] --help" for more information about a command.
+```
 
 The agent supports the following parameters:
 
@@ -43,14 +63,28 @@ The agent supports the following parameters:
 
 ```yaml
 - name: kntrl agent
-  run: sudo docker run --privileged --pid=host --network=host --cgroupns=host --volume=/sys/kernel/debug:/sys/kernel/debug:ro --volume /tmp:/tmp --volume /etc/resolv.conf:/etc/resolv.conf --rm docker.io/kondukto/kntrl:0.0 --mode=allow --hosts=kondukto.io,download.kondukto.io --level=debug &
+  run: sudo docker run --privileged \
+  --pid=host \
+  --network=host \
+  --cgroupns=host \
+  --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
+  --volume /tmp:/tmp \
+  --rm docker.io/kondukto/kntrl:0.0 \
+  --mode=monitor 
 ```
 
 ### Running kntrl on prevent mode
 
 ```yaml
 - name: kntrl agent
-  run: sudo docker run --privileged --pid=host --network=host --cgroupns=host --volume=/sys/kernel/debug:/sys/kernel/debug:ro --volume /tmp:/tmp --volume /etc/resolv.conf:/etc/resolv.conf --rm docker.io/kondukto/kntrl:0.0 --mode=allow --hosts=kondukto.io,download.kondukto.io --level=debug &
+  run: sudo docker run --privileged \
+  --pid=host \
+  --network=host \
+  --cgroupns=host \
+  --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
+  --volume /tmp:/tmp \
+  --rm docker.io/kondukto/kntrl:0.0 \
+  --mode=trace --hosts=download.kondukto.io, .github.com  
 ```
 
 ## Reporting
