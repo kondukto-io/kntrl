@@ -16,11 +16,13 @@ const (
 
 var (
 	verbose bool
+	version = "v0.1.0"
 )
 
 var rootCmd = cobra.Command{
-	Use:   "tracer",
-	Short: "Runtime security tool to control and monitor egress/ingress traffic in CI/CD runners",
+	Use:     "kntrl",
+	Short:   "Runtime security tool to control and monitor egress/ingress traffic in CI/CD runners",
+	Version: version,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		var logLevel = "info"
 		if verbose {
