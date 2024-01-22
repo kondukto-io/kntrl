@@ -1,5 +1,8 @@
 # ignore .txt
 *.txt
-main
+# ignore bin
+kntrl
+# ignore object files
+internal/**/*.o
 
 dist/
