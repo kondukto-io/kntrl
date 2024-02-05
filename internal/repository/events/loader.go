@@ -1,4 +1,4 @@
-package ebpfman
+package events
 
 import (
 	"bytes"
@@ -10,11 +10,9 @@ import (
 
 // Load loads the EBPF collection
 // func (e *EBPF) Load(collection string) error {
-func (e *EBPF) Load(collection []byte) error {
+func (e *EbpfRepo) load(collection []byte) error {
 	var err error
-
 	rd := bytes.NewReader(collection)
-
 	e.Spec, err = ebpf.LoadCollectionSpecFromReader(rd)
 	if err != nil {
 		logger.Log.Fatalf("failed to loading collection spec: %v", err)
