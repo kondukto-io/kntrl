@@ -15,4 +15,4 @@ generate:
 build:
 	go build -o kntrl .
 clean:
-	rm kntrl ./internal/handlers/prevent/bpf_bpfel_x86.o ./internal/handlers/monitor/bpf_bpfel_x86.go
+	rm kntrl ./internal/handlers/prevent/bpf_bpfel_x86.o ./internal/handlers/prevent/bpf_bpfel_x86.go ./internal/handlers/monitor/bpf_bpfel_x86.o ./internal/handlers/monitor/bpf_bpfel_x86.go
