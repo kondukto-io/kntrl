@@ -11,7 +11,7 @@ import (
 func initMonitorCommand() *cobra.Command {
 	monitorCMD := &cobra.Command{
 		Use:   "monitor",
-		Short: "Starts the TCP/UDP prevention",
+		Short: "Starts the TCP/UDP monitor",
 		Run: func(cmd *cobra.Command, args []string) {
 			var eventRepo = eventrepo.New()
 			var eventUC = eventusecase.New(eventRepo)
