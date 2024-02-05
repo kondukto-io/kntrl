@@ -20,7 +20,7 @@ var (
 )
 
 var rootCmd = cobra.Command{
-	Use:     "kntrl",
+	Use:     "start",
 	Short:   "Runtime security tool to control and monitor egress/ingress traffic in CI/CD runners",
 	Version: version,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
@@ -44,7 +44,8 @@ func init() {
 func Execute(args []string) {
 	rootCmd.SetArgs(args)
 
-	rootCmd.AddCommand(initTracerCommand())
+	rootCmd.AddCommand(initMonitorCommand())
+	rootCmd.AddCommand(initPreventCommand())
 
 	if err := rootCmd.Execute(); err != nil {
 		qwe(exitCodeError, err, "failed to execute root command")
