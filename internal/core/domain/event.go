@@ -40,3 +40,17 @@ const (
 	// EventProtocolTCP is the TCP protocol
 	EventProtocolTCP = "tcp"
 )
+
+const (
+	// ModeTypeMonitor is the monitor mode
+	ModeTypeMonitor = "monitor"
+
+	// ModeTypePrevent is the prevent mode
+	ModeTypePrevent = "prevent"
+
+	// ModeIndexMonitor is the index of the monitor mode
+	ModeIndexMonitor = 0
+
+	// ModeIndexPrevent is the index of the prevent mode
+	ModeIndexPrevent = 1
+)
