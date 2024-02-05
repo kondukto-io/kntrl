@@ -36,18 +36,19 @@ The `kntrl` agent is self explanatory and it comes with a help command. Simply r
 Runtime security tool to control and monitor egress/ingress traffic in CI/CD runners
 
 Usage:
-  tracer [command]
+  start [command]
 
 Available Commands:
   completion  Generate the autocompletion script for the specified shell
   help        Help about any command
-  run         Starts the TCP/UDP tracer
+  monitor     Starts the TCP/UDP monitor
+  prevent     Starts the TCP/UDP prevent
 
 Flags:
-  -h, --help      help for tracer
+  -h, --help      help for command
   -v, --verbose   more logs
 
-Use "tracer [command] --help" for more information about a command.
+Use "start [command] --help" for more information about a command.
 ```
 
 The agent supports the following parameters:
@@ -70,7 +71,7 @@ The agent supports the following parameters:
   --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
   --volume /tmp:/tmp \
   --rm docker.io/kondukto/kntrl:0.0 \
-  --mode=monitor 
+  start monitor
 ```
 
 ### Running kntrl on prevent mode
@@ -84,7 +85,7 @@ The agent supports the following parameters:
   --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
   --volume /tmp:/tmp \
   --rm docker.io/kondukto/kntrl:0.0 \
-  --mode=trace --hosts=download.kondukto.io, .github.com  
+  start prevent --hosts=download.kondukto.io, .github.com 
 ```
 
 ## Reporting
