@@ -19,13 +19,14 @@ builds:
     goarch:
       - amd64
       - arm64
+    ldflags:
+      - -s -w -X github.com/kondukto-io/kntrl/cmd/cli.version={{.Version}} -X github.com/kondukto-io/kntrl/cmd/cli.commit={{.ShortCommit}} -X github.com/kondukto-io/kntrl/cmd/cli.buildDate={{.Date}}
     binary: >-
-      {{ .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
+      {{ .ProjectName }}
+      {{- if eq .Arch "amd64" }}
+      {{- else if eq .Arch "386" }}_i386
+      {{- else }}_{{ .Arch }}{{ end }}
+      {{- if .Arm }}_v{{ .Arm }}{{ end }}
     no_unique_dist_dir: true
 
 archives:
@@ -33,6 +34,9 @@ archives:
     # this name template makes the OS and Arch compatible with the results of `uname`.
     name_template: >-
       {{ .Binary }}
+    files:
+      - Readme.md 
+      - LICENSE
 
 changelog:
   sort: asc
@@ -40,6 +44,5 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
-
 sboms:
   - artifacts: archive
