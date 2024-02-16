@@ -15,14 +15,16 @@ const (
 )
 
 var (
-	verbose bool
-	version = "v0.1.0"
+	verbose   bool
+	version   string
+	commit    string
+	buildDate string
 )
 
 var rootCmd = cobra.Command{
 	Use:     "kntrl",
 	Short:   "Runtime security tool to control and monitor egress/ingress traffic in CI/CD runners",
-	Version: version,
+	Version: versionFormatter(version, commit, buildDate),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		var logLevel = "info"
 		if verbose {
@@ -49,6 +51,14 @@ func Execute(args []string) {
 	if err := rootCmd.Execute(); err != nil {
 		qwe(exitCodeError, err, "failed to execute root command")
 	}
+}
+
+func versionFormatter(ver, commit, buildDate string) string {
+	if ver == "" && buildDate == "" && commit == "" {
+		return "kntrl version (built from source)"
+	}
+
+	return fmt.Sprintf("%s (build date: %s commit: %s)", ver, buildDate, commit)
 }
 
 // qwe quits with error. If there are messages, wraps error with message
