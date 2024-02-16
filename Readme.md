@@ -1,8 +1,24 @@
-# Monitor and prevent threats in your pipeline
+# Kntrl - An eBPF agent to monitor and prevent threats in the CI/CD pipelines
 
-kntrl is an eBPF based runtime agent that monitors and prevents anomalous behaviour defined by you on your pipeline using eBPF. kntrl achieves this by monitoring kernel calls, and denying access as soon as your defined behaviour is detected. Refer to this [presentation](https://docs.google.com/presentation/d/1nmbqGfIxp9UyxlfT5EJyQsEWtQaXVoWD9Qjj1MJevuk/edit?usp=sharing) to dive deeper into how we are achieving what kntrl does.
+`kntrl` is an eBPF based runtime agent that monitors and prevents anomalous behaviour defined by you on your pipeline. kntrl achieves this by monitoring kernel calls, and denying access as soon as your defined behaviour is detected. Refer to this [presentation](https://docs.google.com/presentation/d/1nmbqGfIxp9UyxlfT5EJyQsEWtQaXVoWD9Qjj1MJevuk/edit?usp=sharing) to dive deeper into how we are achieving what kntrl does.
 
 It can work as a single binary (`kntrl`) or with a docker runner (`docker.io/kondukto/kntrl:0.1.0`).
+
+## Installation
+### Linux 
+`kntrl` is available as downloadable binaries from the releases page. Download the pre-compiled binary from the `releases` page and copy to the desired location. 
+
+
+### Container Images
+We provide ready to use Docker container images. To pull the latest image:
+```
+docker pull kondukto/kntrl:latest
+```
+
+To pull a specific version:
+```
+docker pull kondukto/kntrl:0.1.0
+```
 
 ## Using kntrl
 
