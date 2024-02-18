@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <linux/socket.h>
+#include <stdint.h>
 
 #include "headers/common.h"
 #include "headers/tcp.h"
@@ -48,6 +49,31 @@ struct {
 } ipv4_closed_events SEC(".maps");
 
 struct event *unused __attribute__((unused));
+
+typedef struct {
+	uint32_t addr;
+	uint32_t mask;
+
+} priv_range;
+
+static int __attribute__((always_inline)) is_private_cidr(uint32_t addr) {
+	const int range_size = sizeof(ranges) / sizeof(ranges[0]);
+
+	struct in_addr netmask;
+	struct in_addr network;
+
+	for (int i=0; i < range_size; i++) {
+		netmask.s_addr = bpf_htonl(~((1 << (32 - ranges[i].mask)) - 1));
+		network.s_addr = bpf_htonl(ranges[i].addr);
+
+		if ((addr & netmask.s_addr) == (network.s_addr & netmask.s_addr)) {
+			return 1;
+		}
+			
+	}
+
+	return 0;
+}
 
 SEC("kprobe/tcp_v4_connect")
 int kprobe__tcp_v4_connect(struct pt_regs *ctx) {
@@ -111,10 +137,10 @@ int inet_sock_set_state(void *ctx) {
 	p32 = (__be32 *)daddr;
 	bpf_printk("tracepoint:=%d oldstate=%d newstate=%d daddr=%pI4", pid, oldstate, newstate, p32);
 
-	if (oldstate == EVENT_TCP_ESTABLISHED) {
+	if ((oldstate == EVENT_TCP_ESTABLISHED) || (is_private_cidr(*p32))){
+		bpf_printk("ADD ALLOW MAP tracepoint:=%d oldstate=%d newstate=%d daddr=%pI4", pid, oldstate, newstate, p32);
 		bpf_map_update_elem(&allow_map, &daddr, &val, BPF_ANY);
 	}
-
 	return 0;
 }
 
