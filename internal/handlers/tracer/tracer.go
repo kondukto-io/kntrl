@@ -200,6 +200,7 @@ func Run(cmd cobra.Command) error {
 		logger.Log.Fatalf("failed to read ipv4 closed events: %s", err)
 	}
 
+	// IPv4Events
 	for {
 		record, err := ipV4Events.Read()
 		if err != nil {
@@ -229,11 +230,12 @@ func Run(cmd cobra.Command) error {
 		}
 
 		taskname := utils.XTrim(event.Task)
+		protocol := utils.GetProtocol(event.Proto)
 
 		var reportEvent = domain.ReportEvent{
 			ProcessID:          event.Pid,
 			TaskName:           taskname,
-			Protocol:           domain.EventProtocolTCP,
+			Protocol:           protocol,
 			DestinationAddress: utils.IntToIP(event.Daddr).String(),
 			DestinationPort:    event.Dport,
 			Domains:            domainNames,
@@ -242,12 +244,13 @@ func Run(cmd cobra.Command) error {
 
 		report.WriteEvent(reportEvent)
 
-		logger.Log.Infof("[%d]%s -> %s:%d (%s) | %s",
+		logger.Log.Infof("[%d]%s -> %s:%d (%s) [%s]| %s",
 			event.Pid,
 			taskname,
 			utils.IntToIP(event.Daddr),
 			event.Dport,
 			domainNames,
+			protocol,
 			policyStatus,
 		)
 	}
@@ -296,6 +299,7 @@ func policyCheck(allowMap *ebpf.Map, allowedIPS []net.IP, domainNames []string, 
 }
 
 func isInLocalRange(daddr uint32) bool {
+	return false
 	ip := utils.IntToIP(daddr)
 
 	for _, r := range utils.AllowedRanges {

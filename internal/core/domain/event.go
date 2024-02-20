@@ -2,10 +2,11 @@ package domain
 
 // Event is a common event interface
 type Event struct {
-	TsUs uint64   //
-	Pid  uint32   // process id
-	Af   uint16   // Address Family
-	Task [16]byte // task name
+	TsUs  uint64   //
+	Pid   uint32   // process id
+	Af    uint16   // Address Family
+	Task  [16]byte // task name
+	Proto uint8    // Protocol name
 }
 
 // IP4Event represents a socket connect event from AF_INET(4)
@@ -39,4 +40,5 @@ const (
 const (
 	// EventProtocolTCP is the TCP protocol
 	EventProtocolTCP = "tcp"
+	EventProtocolUDP = "udp"
 )

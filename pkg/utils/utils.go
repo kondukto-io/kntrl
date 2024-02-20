@@ -88,7 +88,7 @@ func ParseProgramName(e *ebpf.Program) string {
 
 // returns the given protock name
 // TODO: find better alternative
-func PrintProtocol(p uint8) string {
+func GetProtocol(p uint8) string {
 	protocolNames := map[uint8]string{
 		1:  "ICMP", // Protocol number for ICMP is 1.
 		6:  "TCP",  // Protocol number for TCP is 6.
