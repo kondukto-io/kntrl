@@ -37,7 +37,7 @@ const (
 // Run runs the tracer
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
 //
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target=$GOARCH  -cc $BPF_CLANG -cflags $BPF_CFLAGS bpf ../../../bpf/bpf.c -- -I $BPF_HEADERS
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target=$GOARCH  -cc $BPF_CLANG -cflags $BPF_CFLAGS bpf ../../../bpf/sensor.network.bpf.c -- -I $BPF_HEADERS
 func Run(cmd cobra.Command) error {
 	var tracerMode = cmd.Flag("mode").Value.String()
 	if tracerMode == "" {
@@ -218,7 +218,7 @@ func Run(cmd cobra.Command) error {
 		}
 
 		domainAddress := utils.IntToIP(event.Daddr)
-		domainNames, err := net.LookupAddr(domainAddress.String())
+		domainNames, err := utils.LookupAndTrim(domainAddress)
 		if err != nil {
 			logger.Log.Debugf("failed to lookup domain: [%s] %v", domainAddress.String(), err)
 			domainNames = append(domainNames, ".")
@@ -229,7 +229,11 @@ func Run(cmd cobra.Command) error {
 			policyStatus = policyCheck(allowMap, allowedIPS, domainNames, event.Daddr)
 		}
 
-		taskname := utils.XTrim(event.Task)
+		taskname := utils.TrimNullBytes(event.Task)
+		if taskname == "kntrl" {
+			continue
+		}
+
 		protocol := utils.GetProtocol(event.Proto)
 
 		var reportEvent = domain.ReportEvent{
@@ -299,7 +303,6 @@ func policyCheck(allowMap *ebpf.Map, allowedIPS []net.IP, domainNames []string, 
 }
 
 func isInLocalRange(daddr uint32) bool {
-	return false
 	ip := utils.IntToIP(daddr)
 
 	for _, r := range utils.AllowedRanges {

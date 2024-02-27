@@ -30,9 +30,6 @@ func ParseHosts(ips string) ([]net.IP, error) {
 		"127.0.0.1",
 		"169.254.169.254",
 		"168.63.129.16",
-		//"20.102.39.57",
-		//"140.82.112.21",
-		//"52.239.172.36",
 	}
 
 	var retval []net.IP
@@ -104,7 +101,7 @@ func GetProtocol(p uint8) string {
 }
 
 // trim NULL bytes (in the event.Comm)
-func XTrim(p [16]uint8) string {
+func TrimNullBytes(p [16]uint8) string {
 	var comm string
 	for _, v := range p {
 		if v == 0 {
@@ -114,6 +111,21 @@ func XTrim(p [16]uint8) string {
 	}
 
 	return comm
+}
+
+// lookup IP address and trim suffix (".")
+// in the doamin name
+func LookupAndTrim(ip net.IP) ([]string, error) {
+	names, err := net.LookupAddr(ip.String())
+	if err != nil {
+		return names, err
+	}
+
+	for k, v := range names {
+		names[k] = strings.TrimSuffix(v, ".")
+	}
+
+	return names, err
 }
 
 // intToIP converts IPv4 number to net.IP
