@@ -7,27 +7,7 @@ internal/**/*.o
 internal/**/*x86.go
 
 dist/
-
 \.idea/
-
 \.vscode/
-twrap-go
-kondukto
-kondukto-binary.tar.gz
-
-debug
-
-\.netrwhist
-
-twrap-go\.exe
 
 .DS_Store
-/kondukto-tmp
-/.build/
-
-.env
-/out/
-/log/
-__debug_bin
-
-vendor/
