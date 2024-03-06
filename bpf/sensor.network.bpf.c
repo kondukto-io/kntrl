@@ -1,6 +1,5 @@
 //go:build ignore
 
-#include <c++/13.2.1/bits/fs_fwd.h>
 #include <stdbool.h>
 #include <linux/socket.h>
 #include <stdint.h>
