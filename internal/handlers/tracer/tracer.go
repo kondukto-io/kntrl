@@ -37,7 +37,7 @@ const (
 // Run runs the tracer
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
 //
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target=$GOARCH  -cc $BPF_CLANG -cflags $BPF_CFLAGS bpf ../../../bpf/bpf.c -- -I $BPF_HEADERS
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target=$GOARCH  -cc $BPF_CLANG -cflags $BPF_CFLAGS bpf ../../../bpf/sensor.network.bpf.c -- -I $BPF_HEADERS
 func Run(cmd cobra.Command) error {
 	var tracerMode = cmd.Flag("mode").Value.String()
 	if tracerMode == "" {
@@ -200,6 +200,7 @@ func Run(cmd cobra.Command) error {
 		logger.Log.Fatalf("failed to read ipv4 closed events: %s", err)
 	}
 
+	// IPv4Events
 	for {
 		record, err := ipV4Events.Read()
 		if err != nil {
@@ -217,7 +218,7 @@ func Run(cmd cobra.Command) error {
 		}
 
 		domainAddress := utils.IntToIP(event.Daddr)
-		domainNames, err := net.LookupAddr(domainAddress.String())
+		domainNames, err := utils.LookupAndTrim(domainAddress)
 		if err != nil {
 			logger.Log.Debugf("failed to lookup domain: [%s] %v", domainAddress.String(), err)
 			domainNames = append(domainNames, ".")
@@ -228,12 +229,17 @@ func Run(cmd cobra.Command) error {
 			policyStatus = policyCheck(allowMap, allowedIPS, domainNames, event.Daddr)
 		}
 
-		taskname := utils.XTrim(event.Task)
+		taskname := utils.TrimNullBytes(event.Task)
+		if taskname == "kntrl" {
+			continue
+		}
+
+		protocol := utils.GetProtocol(event.Proto)
 
 		var reportEvent = domain.ReportEvent{
 			ProcessID:          event.Pid,
 			TaskName:           taskname,
-			Protocol:           domain.EventProtocolTCP,
+			Protocol:           protocol,
 			DestinationAddress: utils.IntToIP(event.Daddr).String(),
 			DestinationPort:    event.Dport,
 			Domains:            domainNames,
@@ -242,12 +248,13 @@ func Run(cmd cobra.Command) error {
 
 		report.WriteEvent(reportEvent)
 
-		logger.Log.Infof("[%d]%s -> %s:%d (%s) | %s",
+		logger.Log.Infof("[%d]%s -> %s:%d (%s) [%s]| %s",
 			event.Pid,
 			taskname,
 			utils.IntToIP(event.Daddr),
 			event.Dport,
 			domainNames,
+			protocol,
 			policyStatus,
 		)
 	}
