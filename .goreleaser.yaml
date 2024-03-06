@@ -44,5 +44,6 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
-sboms:
-  - artifacts: archive
+
+#sboms:
+#  - artifacts: archive
