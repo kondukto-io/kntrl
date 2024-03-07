@@ -85,7 +85,7 @@ The agent supports the following parameters:
   --cgroupns=host \
   --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
   --volume /tmp:/tmp \
-  --rm docker.io/kondukto/kntrl:0.0 \
+  --rm docker.io/kondukto/kntrl:0.1.0 \
   --mode=monitor 
 ```
 
@@ -99,7 +99,7 @@ The agent supports the following parameters:
   --cgroupns=host \
   --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
   --volume /tmp:/tmp \
-  --rm docker.io/kondukto/kntrl:0.0 \
+  --rm docker.io/kondukto/kntrl:0.1.0 \
   --mode=trace --hosts=download.kondukto.io, .github.com  
 ```
 
@@ -131,16 +131,29 @@ Here is an example report:
   ],
   "policy": "block"
 }
+{
+  "pid": 921,
+  "task_name": "python3",
+  "proto": "udp",
+  "daddr": "168.63.129.16",
+  "dport": 443,
+  "domains": [
+    "-"
+  ],
+  "policy": "pass"
+}
 ```
 
 or 
 
 ```
-Pid  | Comm | Proto | Domain                           | Destination Addr   | Policy
+Pid  | Comm    | Proto | Domain                          | Destination Addr   | Policy
 ------------------------------------------------------------------------------------
-2806 | curl | tcp   | lb-140-82-114-22-iad.github.com. | 140.82.114.22:443  | pass
+2806 | curl    | tcp   | lb-140-82-114-22-iad.github.com | 140.82.114.22:443  | pass
 ------------------------------------------------------------------------------------
-2806 | curl | tcp   | ww-in-f95.1e100.net.             | 142.251.167.95:443 | block
+2806 | curl    | tcp   | ww-in-f95.1e100.net             | 142.251.167.95:443 | block
+------------------------------------------------------------------------------------
+921  | python3 | udp   | 168.63.129.16                   | 142.251.167.95:443 | pass
 ------------------------------------------------------------------------------------
 ```
 
