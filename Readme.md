@@ -162,5 +162,4 @@ Pid  | Comm    | Proto | Domain                          | Destination Addr   | 
 Contributions to kntrl are welcome.
 
 ## License
-
-[GPLv3](./LICENSE.md)
+Except for the eBPF code, all components are distributed under the [Apache License (version 2.0)](./LICENSE.md).
