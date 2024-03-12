@@ -85,7 +85,7 @@ The agent supports the following parameters:
   --cgroupns=host \
   --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
   --volume /tmp:/tmp \
-  --rm docker.io/kondukto/kntrl:0.0 \
+  --rm docker.io/kondukto/kntrl:0.1.0 \
   --mode=monitor 
 ```
 
@@ -99,7 +99,7 @@ The agent supports the following parameters:
   --cgroupns=host \
   --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
   --volume /tmp:/tmp \
-  --rm docker.io/kondukto/kntrl:0.0 \
+  --rm docker.io/kondukto/kntrl:0.1.0 \
   --mode=trace --hosts=download.kondukto.io, .github.com  
 ```
 
@@ -131,16 +131,29 @@ Here is an example report:
   ],
   "policy": "block"
 }
+{
+  "pid": 2806,
+  "task_name": "curl",
+  "proto": "udp",
+  "daddr": "127.0.0.1",
+  "dport": 53,
+  "domains": [
+    "localhost"
+  ],
+  "policy": "pass"
+}
 ```
 
 or 
 
 ```
-Pid  | Comm | Proto | Domain                           | Destination Addr   | Policy
+Pid  | Comm    | Proto | Domain                          | Destination Addr   | Policy
 ------------------------------------------------------------------------------------
-2806 | curl | tcp   | lb-140-82-114-22-iad.github.com. | 140.82.114.22:443  | pass
+2806 | curl    | tcp   | lb-140-82-114-22-iad.github.com | 140.82.114.22:443  | pass
 ------------------------------------------------------------------------------------
-2806 | curl | tcp   | ww-in-f95.1e100.net.             | 142.251.167.95:443 | block
+2806 | curl    | tcp   | ww-in-f95.1e100.net             | 142.251.167.95:443 | block
+------------------------------------------------------------------------------------
+2806 | curl    | udp   | localhost                       | 127.0.0.1:53       | pass
 ------------------------------------------------------------------------------------
 ```
 
@@ -149,5 +162,4 @@ Pid  | Comm | Proto | Domain                           | Destination Addr   | Po
 Contributions to kntrl are welcome.
 
 ## License
-
-[GPLv3](./LICENSE.md)
+Except for the eBPF code, all components are distributed under the [Apache License (version 2.0)](./LICENSE.md).
