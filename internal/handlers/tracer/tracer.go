@@ -32,6 +32,7 @@ var (
 
 const (
 	rootCgroup = "/sys/fs/cgroup"
+	progName   = "kntrl"
 )
 
 // Run runs the tracer
@@ -230,7 +231,7 @@ func Run(cmd cobra.Command) error {
 		}
 
 		taskname := utils.TrimNullBytes(event.Task)
-		if taskname == "kntrl" {
+		if taskname == progName {
 			continue
 		}
 
