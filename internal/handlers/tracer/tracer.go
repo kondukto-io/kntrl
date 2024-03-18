@@ -35,6 +35,13 @@ const (
 	progName   = "kntrl"
 )
 
+func init() {
+	if !utils.IsRoot() {
+		logger.Log.Error("you need root privileges to run this program")
+		os.Exit(1)
+	}
+}
+
 // Run runs the tracer
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
 //
@@ -57,10 +64,6 @@ func Run(cmd cobra.Command) error {
 	allowedIPS, err := utils.ParseHosts(allowedHosts)
 	if err != nil {
 		return fmt.Errorf("failed to parse allowed hosts: %w", err)
-	}
-
-	if !utils.IsRoot() {
-		return errors.New("you need root privileges to run this program")
 	}
 
 	var ebpfClient = ebpfman.New()

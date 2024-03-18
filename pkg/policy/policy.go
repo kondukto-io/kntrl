@@ -1,4 +1,4 @@
-package main
+package policy
 
 import (
 	"context"
@@ -38,7 +38,7 @@ func New(fs files.FS, data []byte) (*Policy, error) {
 
 	dataJson, err := unmarshal(data)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal data json: %w", err)
 	}
 
 	store := inmem.NewFromObject(dataJson)
@@ -71,17 +71,17 @@ func (p *Policy) AddQuery(query string) {
 func (p *Policy) Eval(ctx context.Context, input []byte) (bool, error) {
 	query, err := rego.New(p.regoArgs...).PrepareForEval(ctx)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to prepare rego query: %w", err)
 	}
 
 	inputJson, err := unmarshal(input)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to unmarshal input json: %w", err)
 	}
 
 	result, err := query.Eval(ctx, rego.EvalInput(inputJson))
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to eval rego query: %w", err)
 	}
 
 	// TODO: check for nil pointer
