@@ -2,8 +2,10 @@ package tracer
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -18,9 +20,12 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	"github.com/kondukto-io/kntrl/bundle"
 	"github.com/kondukto-io/kntrl/internal/core/domain"
 	ebpfman "github.com/kondukto-io/kntrl/pkg/ebpf"
 	"github.com/kondukto-io/kntrl/pkg/logger"
+	"github.com/kondukto-io/kntrl/pkg/parser"
+	"github.com/kondukto-io/kntrl/pkg/policy"
 	"github.com/kondukto-io/kntrl/pkg/reporter"
 	"github.com/kondukto-io/kntrl/pkg/utils"
 )
@@ -47,6 +52,8 @@ func init() {
 //
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target=$GOARCH  -cc $BPF_CLANG -cflags $BPF_CFLAGS bpf ../../../bpf/sensor.network.bpf.c -- -I $BPF_HEADERS
 func Run(cmd cobra.Command) error {
+	var bundleFS = bundle.Bundle
+
 	var tracerMode = cmd.Flag("mode").Value.String()
 	if tracerMode == "" {
 		return errors.New("[mode] flag is required")
@@ -56,15 +63,22 @@ func Run(cmd cobra.Command) error {
 		return fmt.Errorf("[mode] flag is invalid: %s", tracerMode)
 	}
 
-	var allowedHosts = cmd.Flag("hosts").Value.String()
-	if allowedHosts == "" {
-		logger.Log.Debugf("no host provided allowed")
+	cmddata, err := parseFlags(&cmd)
+	if err != nil {
+		return fmt.Errorf("data json error: %w", err)
 	}
 
-	allowedIPS, err := utils.ParseHosts(allowedHosts)
+	dataObj, err := json.Marshal(cmddata)
 	if err != nil {
-		return fmt.Errorf("failed to parse allowed hosts: %w", err)
+		return fmt.Errorf("error converting dataobj: %w", err)
 	}
+
+	p, err := policy.New(bundleFS, dataObj)
+	if err != nil {
+		return fmt.Errorf("policy init error: %w", err)
+	}
+
+	p.AddQuery("data.kntrl.policy")
 
 	var ebpfClient = ebpfman.New()
 	if err := ebpfClient.Load(prog); err != nil {
@@ -93,13 +107,19 @@ func Run(cmd cobra.Command) error {
 	}
 
 	allowMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllow]
+	{
+		for _, ipstr := range cmddata.AllowedIPs {
+			ip := ipstr.To4()
+			var ipUint32 uint32
+			if len(ip) > 16 {
+				ipUint32 = binary.LittleEndian.Uint32(ip[12:16])
+			} else {
+				ipUint32 = binary.LittleEndian.Uint32(ip)
 
-	for _, ip := range allowedIPS {
-		// convert the IP bytes to __u32
-		ipUint32 := binary.LittleEndian.Uint32(ip)
-		if err := allowMap.Put(ipUint32, uint32(1)); err != nil {
-			// if err := allowMap.Put(uint32(key), ipUint32); err != nil {
-			logger.Log.Fatalf("failed to update allow list (map): %v", err)
+			}
+			if err := allowMap.Put(ipUint32, uint32(1)); err != nil {
+				logger.Log.Fatalf("failed to update allow list (map): %v", err)
+			}
 		}
 	}
 
@@ -230,7 +250,15 @@ func Run(cmd cobra.Command) error {
 
 		var policyStatus = domain.EventPolicyStatusPass
 		if tracerMode != domain.TracerModeMonitor {
-			policyStatus = policyCheck(allowMap, allowedIPS, domainNames, event.Daddr)
+			result, err := p.EvalEvent(context.Background(), event)
+			if err != nil {
+				logger.Log.Debugf("policy eval failed: %v", err)
+			}
+			if result {
+				policyStatus = "pass"
+			} else {
+				policyStatus = "block"
+			}
 		}
 
 		taskname := utils.TrimNullBytes(event.Task)
@@ -268,6 +296,31 @@ EXIT:
 	report.PrintReportTable()
 	report.Close()
 	return nil
+}
+
+func parseFlags(cmd *cobra.Command) (*domain.Data, error) {
+	allowedHostsFlag := cmd.Flag("allowed-hosts")
+	allowedIPAddrFlag := cmd.Flag("allowed-ips")
+
+	if allowedIPAddrFlag.Value.String() == "" || allowedHostsFlag.Value.String() == "" {
+		return nil, errors.New("no allowed hosts or IP addresses provided")
+	}
+
+	ghmeta, err := cmd.Flags().GetBool("allow-github-meta")
+	if err != nil {
+		return nil, err
+	}
+	localranges, err := cmd.Flags().GetBool("allow-local-ranges")
+	if err != nil {
+		return nil, err
+	}
+
+	return parser.ToDataJson(
+		allowedHostsFlag.Value.String(),
+		allowedIPAddrFlag.Value.String(),
+		ghmeta,
+		localranges,
+	), nil
 }
 
 func policyCheck(allowMap *ebpf.Map, allowedIPS []net.IP, domainNames []string, destinationAddress uint32) string {

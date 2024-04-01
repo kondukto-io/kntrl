@@ -2,10 +2,12 @@ package policy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	files "io/fs"
 	"strings"
 
+	"github.com/kondukto-io/kntrl/internal/core/domain"
 	"github.com/open-policy-agent/opa/bundle"
 	"github.com/open-policy-agent/opa/loader/filter"
 	"github.com/open-policy-agent/opa/rego"
@@ -85,6 +87,17 @@ func (p *Policy) Eval(ctx context.Context, input map[string]interface{}) (bool, 
 
 	// TODO: check for nil pointer
 	return result[0].Expressions[0].Value.(bool), nil
+}
+
+func (p *Policy) EvalEvent(ctx context.Context, event domain.IP4Event) (bool, error) {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return false, err
+	}
+	var outmap map[string]any
+	json.Unmarshal(data, &outmap)
+
+	return p.Eval(ctx, outmap)
 }
 
 func unmarshal(data []byte) (dataJson map[string]interface{}, err error) {
