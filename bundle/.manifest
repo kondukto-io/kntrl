@@ -1,0 +1,6 @@
+{
+  "roots": ["kntrl","assets"],
+  "metadata": {
+    "name": "kntrl"
+  }
+}

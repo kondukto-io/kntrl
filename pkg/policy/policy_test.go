@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kondukto-io/kntrl/bundle"
+	"github.com/open-policy-agent/opa/util"
 )
 
 var testCases = map[string]struct {
@@ -23,13 +24,18 @@ var testCases = map[string]struct {
 		true,
 	},
 	"allow_host": {
-		[]byte(`{"allowed_hosts":["foo.com"], "allowed_ip_addr":["1.1.1.1"], "allow_github_meta": false, "allow_local_ip_ranges": true}`),
+		[]byte(`{"allowed_hosts":["foo.com"], "allowed_ip_addr":["1.2.3.1"], "allow_github_meta": false, "allow_local_ip_ranges": true}`),
 		[]byte(`{"pid": 2806,"task_name": "curl","proto": "tcp","daddr": "1.1.1.1","dport": 443,"domains": ["foo.com"]}`),
+		true,
+	},
+	"allow_github_meta": {
+		[]byte(`{"allowed_hosts":["foo.com"], "allowed_ip_addr":["1.1.1.1"], "allow_github_meta": true, "allow_local_ip_ranges": false}`),
+		[]byte(`{"daddr":"4.148.0.12", "domains": ["foo.bar"]}`),
 		true,
 	},
 }
 
-func TestPolicyRawLocal(t *testing.T) {
+func TestPolicyRaw(t *testing.T) {
 	var bundleFS = bundle.Bundle
 
 	for name, test := range testCases {
@@ -39,7 +45,12 @@ func TestPolicyRawLocal(t *testing.T) {
 		}
 		p.AddQuery("data.kntrl.policy")
 
-		result, err := p.Eval(context.Background(), test.input)
+		var inputjson map[string]interface{}
+		if err := util.Unmarshal(test.input, &inputjson); err != nil {
+			t.Errorf("[%s] unmarshal error: %v", name, err)
+		}
+
+		result, err := p.Eval(context.Background(), inputjson)
 		if err != nil {
 			t.Errorf("[%s] eval error: %v", name, err)
 		}
@@ -47,6 +58,5 @@ func TestPolicyRawLocal(t *testing.T) {
 		if result != test.expected {
 			t.Errorf("[%s] expected policy status '%v', got %v", name, test.expected, result)
 		}
-
 	}
 }
