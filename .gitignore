@@ -1,7 +1,6 @@
 # ignore .txt
 *.txt
 # ignore bin
-kntrl
 # ignore object files
 internal/**/*.o
 internal/**/*x86.go
