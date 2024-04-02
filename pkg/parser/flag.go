@@ -19,6 +19,7 @@ func ToDataJson(allowed_hosts, allowed_ips string, ghrange, localrange bool) *do
 	hosts, ips := getDNSServers()
 	hosts = append(hosts, parseAllowedHosts(allowed_hosts)...)
 	ips = append(ips, parseAllowedIPAddr(allowed_ips)...)
+	ips = append(ips, host2ip(hosts)...)
 
 	return &domain.Data{
 		AllowedHosts:       hosts,
@@ -56,6 +57,22 @@ func parseAllowedHosts(hosts string) (hl []string) {
 	}
 
 	return hl
+}
+
+// find a better solution
+func host2ip(hosts []string) (ipl []net.IP) {
+	for _, h := range hosts {
+		ip, err := net.LookupIP(h)
+		if err != nil {
+			continue
+		}
+		for _, v := range ip {
+			if ipv4 := v.To4(); ipv4 != nil {
+				ipl = append(ipl, ipv4)
+			}
+		}
+	}
+	return
 }
 
 func getDNSServers() (hosts []string, ips []net.IP) {
