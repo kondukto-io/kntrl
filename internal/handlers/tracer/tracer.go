@@ -248,19 +248,8 @@ func Run(cmd cobra.Command) error {
 			domainNames = append(domainNames, ".")
 		}
 
+		// evaluate policy
 		var policyStatus = domain.EventPolicyStatusPass
-		if tracerMode != domain.TracerModeMonitor {
-			result, err := p.EvalEvent(context.Background(), event)
-			if err != nil {
-				logger.Log.Debugf("policy eval failed: %v", err)
-			}
-			if result {
-				policyStatus = "pass"
-			} else {
-				policyStatus = "block"
-			}
-		}
-
 		taskname := utils.TrimNullBytes(event.Task)
 		if taskname == progName {
 			continue
@@ -278,6 +267,26 @@ func Run(cmd cobra.Command) error {
 			Policy:             policyStatus,
 		}
 
+		// policy logic
+		if tracerMode != domain.TracerModeMonitor {
+			result, err := p.EvalEvent(context.Background(), reportEvent)
+			if err != nil {
+				logger.Log.Debugf("policy eval failed: %v", err)
+			}
+			if result {
+				policyStatus = domain.EventPolicyStatusPass
+				if err := allowMap.Put(event.Daddr, uint32(1)); err != nil {
+					logger.Log.Fatalf("failed to update allow list (map): %v", err)
+				}
+				logger.Log.Infof("ip [%d] added into allowed list", event.Daddr)
+
+			} else {
+				policyStatus = domain.EventPolicyStatusBlock
+			}
+			reportEvent.Policy = policyStatus
+		}
+
+		// report
 		report.WriteEvent(reportEvent)
 
 		logger.Log.Infof("[%d]%s -> %s:%d (%s) [%s]| %s",

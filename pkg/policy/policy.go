@@ -89,7 +89,7 @@ func (p *Policy) Eval(ctx context.Context, input map[string]interface{}) (bool, 
 	return result[0].Expressions[0].Value.(bool), nil
 }
 
-func (p *Policy) EvalEvent(ctx context.Context, event domain.IP4Event) (bool, error) {
+func (p *Policy) EvalEvent(ctx context.Context, event domain.ReportEvent) (bool, error) {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return false, err

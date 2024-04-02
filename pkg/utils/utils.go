@@ -87,9 +87,9 @@ func ParseProgramName(e *ebpf.Program) string {
 // TODO: find better alternative
 func GetProtocol(p uint8) string {
 	protocolNames := map[uint8]string{
-		1:  "ICMP", // Protocol number for ICMP is 1.
-		6:  "TCP",  // Protocol number for TCP is 6.
-		17: "UDP",  // Protocol number for UDP is 17.
+		1:  "icmp", // Protocol number for ICMP is 1.
+		6:  "tcp",  // Protocol number for TCP is 6.
+		17: "udp",  // Protocol number for UDP is 17.
 		// Add more protocol numbers and their names if needed.
 	}
 
