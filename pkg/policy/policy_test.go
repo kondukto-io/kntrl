@@ -33,6 +33,11 @@ var testCases = map[string]struct {
 		[]byte(`{"daddr":"4.148.0.12", "domains": ["foo.bar"]}`),
 		true,
 	},
+	"allow_github_meta_1": {
+		[]byte(`{"allowed_hosts":["foo.com"], "allowed_ip_addr":["1.1.1.1"], "allow_github_meta": true, "allow_local_ip_ranges": false}`),
+		[]byte(`{"pid":1636,"task_name":".NET ThreadPool","proto":"tcp","daddr":"20.102.39.57","dport":443,"domains":["."]}`),
+		true,
+	},
 }
 
 func TestPolicyRaw(t *testing.T) {
