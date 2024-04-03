@@ -310,7 +310,7 @@ func parseFlags(cmd *cobra.Command) (*domain.Data, error) {
 	allowedHostsFlag := cmd.Flag("allowed-hosts")
 	allowedIPAddrFlag := cmd.Flag("allowed-ips")
 
-	if allowedIPAddrFlag.Value.String() == "" || allowedHostsFlag.Value.String() == "" {
+	if allowedIPAddrFlag.Value.String() == "" && allowedHostsFlag.Value.String() == "" {
 		return nil, errors.New("no allowed hosts or IP addresses provided")
 	}
 
