@@ -28,7 +28,7 @@ You can start using kntrl agent by simply running the following command:
 
 ```yaml
 - name: kntrl agent
-  run: sudo ./kntrl run --mode=monitor --hosts=download.kondukto.io,${{ env.GITHUB_ACTIONS_URL }} 
+  run: sudo ./kntrl run --mode=monitor --allowed-hosts=download.kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allowed-ips=10.0.2.3  
 ```
 
 OR with the docker:
@@ -41,7 +41,7 @@ OR with the docker:
     --cgroupns=host \
     --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
     --volume /tmp:/tmp \
-    --rm docker.io/kondukto/kntrl:0.1.0 run --mode=trace --hosts=kondukto.io,download.kondukto.io 
+    --rm docker.io/kondukto/kntrl:0.1.0 run --mode=trace --allowed-hosts=kondukto.io,download.kondukto.io 
 ```
 
 This action will deploy kntrl into any GitHub Actions build.
@@ -73,8 +73,10 @@ The agent supports the following parameters:
 | Name                     | Default               | Description                                                                                                                                                                                                                                                                                                                                                               |
 | ------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mode`                   |   monitor                    | kntrl for detected behaviours (monitor or prevent/trace)                                                                                                                                                                                                                                                                                                                  |
-| `hosts`                  |                       | allowed host list. IP or hostname (192.168.0.100, example.com, .github.com)                                                                                                                                                                                                                                                                                                                                                         |
-| `level`                  |   info              | level of detail for logging (info, debug)                                                                                                                                                                                                                                                                                                                               |
+| `allowed-hosts`                  |                       | allowed host list. (example.com, .github.com)                                                                                                                                                                                                                                                                                                                                                         |
+| `allowed-ips`                  |                       | allowed IP list. (192.168.0.100, 1.1.1.1)                                                                                                                                                                                                                                                                                                                                                         |
+| `allow-local-ranges`                  |  true              | allow access to local IP ranges                                                                                                                                                                                                                                                                                                                               |
+| `allow-github-meta`                  |  false              | allow access to GitHub meta IP ranges (https://api.github.com/meta)                                                                                                                                                                                                                                                                                                                               |
 | `output-file`                  | `/tmp/kntrl.out`                       | report file |                                                                                                                                                                                                                                     |
 
 ### Running kntrl on monitoring mode
@@ -102,7 +104,24 @@ The agent supports the following parameters:
   --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
   --volume /tmp:/tmp \
   --rm docker.io/kondukto/kntrl:0.1.0 \
-  --mode=trace --hosts=download.kondukto.io, .github.com  
+  --mode=trace --allowed-hosts=download.kondukto.io, .github.com  
+```
+
+## Open Policy Agent (OPA) Rules
+`kntrl` supports an OPA-based policy engine to determine whether the event should be blocked or not. All the policy rules are stored under the bundle/kntrl/ directory.
+
+An example rego rule:
+```
+package kntrl.network["is_local_ip_addr"]
+
+import rego.v1
+
+policy if {
+        ipaddr := input.daddr
+        local_ranges := ["192.168.0.0/16", "172.16.0.0/12", "10.0.0.0/8", "0.0.0.0/32"]
+        net.cidr_contains(local_ranges[_], ipaddr)
+        data.allow_local_ip_ranges == true
+}
 ```
 
 ## Reporting
