@@ -138,7 +138,6 @@ int inet_sock_set_state(void *ctx) {
 	p32 = (__be32 *)daddr;
 	bpf_printk("tracepoint:=%d oldstate=%d newstate=%d daddr=%pI4", pid, oldstate, newstate, p32);
 
-	//if ((oldstate == EVENT_TCP_ESTABLISHED) || (is_allowed_cidr(*p32))){
 	if (oldstate == EVENT_TCP_ESTABLISHED){
 		bpf_map_update_elem(&allow_map, &daddr, &val, BPF_ANY);
 	}
@@ -153,12 +152,6 @@ inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 	// load packet header
 	bpf_skb_load_bytes(skb, 0, &iph, sizeof(struct iphdr));
 
-	// pass all UDP traffic for now
-	//if (iph.protocol == IPPROTO_UDP){
-	//	return 1;
-	//}
-
-	//if ((iph.version == 4) && (iph.protocol == IPPROTO_TCP)){
 	if (iph.version == 4){
 		bool pass = bpf_map_lookup_elem(&allow_map, &iph.saddr) || bpf_map_lookup_elem(&allow_map, &iph.daddr);
 
@@ -173,7 +166,6 @@ inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 		}
 	}
 
-	//bpf_printk("cgroup_skb/egress=%d", iph.daddr);
 	// 0 block || 1 pass
 	return block;
 }
