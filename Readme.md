@@ -183,3 +183,6 @@ Feel free to join our slack channel [https://kntrl.slack.com](https://kntrl.slac
 
 ## License
 Except for the eBPF code, all components are distributed under the [Apache License (version 2.0)](./LICENSE.md).
+
+## More about Kondukto
+`kntrl` is an open source project maintained by [https://kondukto.io](Kondukto).
