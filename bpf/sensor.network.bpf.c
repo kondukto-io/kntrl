@@ -1,16 +1,14 @@
 //go:build ignore
 
+#include "headers/vmlinux.h"
 #include <stdbool.h>
-#include <linux/socket.h>
-#include <stdint.h>
 
-#include "headers/common.h"
-#include "headers/tcp.h"
 #include "headers/bpf_helpers.h"
 #include "headers/bpf_core_read.h"
 #include "headers/bpf_endian.h"
 #include "headers/bpf_tracing.h"
 
+#define AF_INET 2
 #define TASK_COMM_LEN 16
 #define MAX_ENTIRES 1024
 #define MODE_ALLOW 1
@@ -138,13 +136,60 @@ int inet_sock_set_state(void *ctx) {
 	p32 = (__be32 *)daddr;
 	bpf_printk("tracepoint:=%d oldstate=%d newstate=%d daddr=%pI4", pid, oldstate, newstate, p32);
 
-	if (oldstate == EVENT_TCP_ESTABLISHED){
+	//if (oldstate == EVENT_TCP_ESTABLISHED){
+	if (oldstate == BPF_TCP_ESTABLISHED){
 		bpf_map_update_elem(&allow_map, &daddr, &val, BPF_ANY);
 	}
 	return 0;
 }
 
+/*
+static inline int read_dns(struct __sk_buff *skb) {
+	void *data_end = (void *)(long)skb->data_end;
+	void *data = (void *)(long)skb->data;
+
+	struct ethhdr *eth = data;
+	__u16 h_proto;
+	__u64 nh_off = 0;
+	nh_off = sizeof(*eth);
+
+	if (data + nh_off > data_end) {
+		return 0;
+	}
+	h_proto = eth->h_proto;
+	if (h_proto == bpf_htons(ETH_P_IP)) {
+		struct iphdr *iph = data + nh_off;
+
+		if ((void*)(iph + 1) > data_end) {
+			return 0;
+		}
+
+		if (iph->protocol != IPPROTO_UDP) {
+			return 0;
+		}
+
+		__u32 ip_hlen = 0;
+		ip_hlen = iph->ihl << 2;
+
+	        struct udphdr *udph = data + nh_off + sizeof(*iph);
+	        if ((void*)(udph + 1) > data_end) {
+		    return 0;
+	        }
+		__u16 src_port = bpf_ntohs(udph->source);
+	        __u16 dst_port = bpf_ntohs(udph->dest);
+		
+		if (src_port == 53 || dst_port == 53) {
+			u32 pid = bpf_get_current_pid_tgid() >> 32;
+			bpf_printk("read_dns:pid=%d",pid);
+		}
+	}
+	return 1;
+}
+*/
+
 inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
+//	read_dns(skb);
+
 	bool block = true;
 
 	// INFO: ingress context is usually a kernel thread or a running task
