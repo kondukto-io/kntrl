@@ -7,11 +7,15 @@
 #include "headers/bpf_core_read.h"
 #include "headers/bpf_endian.h"
 #include "headers/bpf_tracing.h"
+#include "headers/skbuff.h"
+#include "headers/dns.h"
 
 #define AF_INET 2
 #define TASK_COMM_LEN 16
 #define MAX_ENTIRES 1024
 #define MODE_ALLOW 1
+
+#define ETH_P_IP	0x0800		/* Internet Protocol packet	*/
 
 ///* Map for allowed IP addresses (hosts) from userspace */
 struct bpf_map_def SEC("maps") allow_map = {
@@ -47,7 +51,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
 } ipv4_closed_events SEC(".maps");
 
-static int __attribute__((always_inline)) handle_event(struct ipv4_event_t *evt4, struct sockaddr *address, uint8_t proto) {
+static int __attribute__((always_inline)) handle_event(struct ipv4_event_t *evt4, struct sock *sk, struct sockaddr *address, uint8_t proto) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u16 address_family = 0;
 
@@ -69,6 +73,34 @@ static int __attribute__((always_inline)) handle_event(struct ipv4_event_t *evt4
 
 		bpf_get_current_comm(&evt4->task, TASK_COMM_LEN);
 
+		if (evt4->dport == 53) {
+			// get DNS header
+			struct sk_buff_head skbhead;
+			struct sk_buff *skb = NULL;
+
+			if (sk) {
+				bpf_probe_read(&skbhead, sizeof(skbhead), &sk->sk_write_queue);
+				//skb = skb_peek(&skbhead);
+			}
+
+			if (skb) {
+				//__u64 nh_off = 0;
+				//void *data_end = (void *)(long)skb->end;
+				//void *data = (void *)(long)skb->data;
+				bpf_printk("\tDNS request: taskname=%s | SKB | dns=%x", evt4->task, skb->data);
+
+				//struct ethhdr *eth = data;
+				//nh_off = sizeof(*eth);
+			        //struct iphdr *iph = data + nh_off;
+				//struct udphdr *udph = data + nh_off + sizeof(*iph);
+				//struct dns_hdr *dns_hdr = data + sizeof(*eth) + sizeof(*iph) + sizeof(*udph);
+
+				//bpf_printk("\tDNS request: taskname=%s | SKB | dns=%d", evt4->task, dns_hdr->qr);
+			} else {
+				bpf_printk("\tDNS request: taskname=%s", evt4->task);
+			}
+		}
+
 		if (evt4->dport != 0) {
 			return 1;
 		}
@@ -79,13 +111,18 @@ static int __attribute__((always_inline)) handle_event(struct ipv4_event_t *evt4
 
 SEC("kprobe/ip4_datagram_connect")
 int kprobe__ip4_datagram_connect(struct pt_regs *ctx) {
+	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	if (!sk) {
+		return 0;
+	}
+
 	struct sockaddr *address = (struct sockaddr *)PT_REGS_PARM2(ctx);
 	if (!address) {
 		return 0;
 	}
 
 	struct ipv4_event_t evt4 = {};
-	if (handle_event(&evt4, address, IPPROTO_UDP)) {
+	if (handle_event(&evt4, sk, address, IPPROTO_UDP)) {
 	            bpf_perf_event_output(ctx, &ipv4_events, BPF_F_CURRENT_CPU, &evt4, sizeof(evt4));
 	}
 	bpf_printk("kprobe:ip4_datagram_connect - handle event pid=%d AF=%d Proto=%d IP=%pI4", evt4.pid, evt4.af, evt4.proto, evt4.daddr);
@@ -95,13 +132,18 @@ int kprobe__ip4_datagram_connect(struct pt_regs *ctx) {
 
 SEC("kprobe/tcp_v4_connect")
 int kprobe__tcp_v4_connect(struct pt_regs *ctx) {
+	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	if (!sk) {
+		return 0;
+	}
+
 	struct sockaddr *address = (struct sockaddr *)PT_REGS_PARM2(ctx);
 	if (!address) {
 		return 0;
 	}
 
 	struct ipv4_event_t evt4 = {};
-	if (handle_event(&evt4, address, IPPROTO_TCP)) {
+	if (handle_event(&evt4, sk, address, IPPROTO_TCP)) {
 	            bpf_perf_event_output(ctx, &ipv4_events, BPF_F_CURRENT_CPU, &evt4, sizeof(evt4));
 	}
 	bpf_printk("kprobe:tcp_v4_connect - handle event pid=%d AF=%d Proto=%d IP=%pI4", evt4.pid, evt4.af, evt4.proto, evt4.daddr);
@@ -143,53 +185,7 @@ int inet_sock_set_state(void *ctx) {
 	return 0;
 }
 
-/*
-static inline int read_dns(struct __sk_buff *skb) {
-	void *data_end = (void *)(long)skb->data_end;
-	void *data = (void *)(long)skb->data;
-
-	struct ethhdr *eth = data;
-	__u16 h_proto;
-	__u64 nh_off = 0;
-	nh_off = sizeof(*eth);
-
-	if (data + nh_off > data_end) {
-		return 0;
-	}
-	h_proto = eth->h_proto;
-	if (h_proto == bpf_htons(ETH_P_IP)) {
-		struct iphdr *iph = data + nh_off;
-
-		if ((void*)(iph + 1) > data_end) {
-			return 0;
-		}
-
-		if (iph->protocol != IPPROTO_UDP) {
-			return 0;
-		}
-
-		__u32 ip_hlen = 0;
-		ip_hlen = iph->ihl << 2;
-
-	        struct udphdr *udph = data + nh_off + sizeof(*iph);
-	        if ((void*)(udph + 1) > data_end) {
-		    return 0;
-	        }
-		__u16 src_port = bpf_ntohs(udph->source);
-	        __u16 dst_port = bpf_ntohs(udph->dest);
-		
-		if (src_port == 53 || dst_port == 53) {
-			u32 pid = bpf_get_current_pid_tgid() >> 32;
-			bpf_printk("read_dns:pid=%d",pid);
-		}
-	}
-	return 1;
-}
-*/
-
 inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
-//	read_dns(skb);
-
 	bool block = true;
 
 	// INFO: ingress context is usually a kernel thread or a running task
