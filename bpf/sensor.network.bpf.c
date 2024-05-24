@@ -7,6 +7,7 @@
 #include "headers/bpf_core_read.h"
 #include "headers/bpf_endian.h"
 #include "headers/bpf_tracing.h"
+#include "headers/dns.h"
 
 #define AF_INET 2
 #define TASK_COMM_LEN 16
@@ -49,6 +50,33 @@ struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
 } ipv4_closed_events SEC(".maps");
 
+// Taken from: 
+// https://github.com/DataDog/datadog-agent/blob/main/pkg/network/ebpf/c/skb.h
+static __always_inline unsigned char* sk_buff_head(struct sk_buff *skb) {
+	unsigned char *h = NULL;
+	BPF_CORE_READ_INTO(&h, skb, head);
+	return h;
+}
+
+static __always_inline u16 sk_buff_network_header(struct sk_buff *skb) {
+	u16 net_head = 0;
+	BPF_CORE_READ_INTO(&net_head, skb, network_header);
+	return net_head;
+}
+
+static __always_inline u16 __strlen(char *ptr) {
+	int len = 0;
+
+	for (int i = 0; i < 256; i++) {
+		if (*ptr == '\0')
+			break;
+		len++; 
+		ptr++;
+	}
+
+	return len;
+}
+
 static int __attribute__((always_inline)) handle_event(struct ipv4_event_t *evt4, struct sockaddr *address, uint8_t proto) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u16 address_family = 0;
@@ -81,36 +109,104 @@ static int __attribute__((always_inline)) handle_event(struct ipv4_event_t *evt4
 
 SEC("kprobe/skb_consume_udp")
 int kprobe__skb_consume_udp(struct pt_regs *ctx) {
-	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
-	if (!sk) {
-		return 0;
-	}
+	//struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	//if (!sk) {
+	//	return 0;
+	//}
 
 	struct sk_buff *skb = (struct sk_buff *)PT_REGS_PARM2(ctx);
 	if (!skb) {
 		return 0;
 	} 
 
-	u16 dport, sport = 0;
-	bpf_probe_read(&dport, sizeof(dport), &sk->__sk_common.skc_dport);
-	bpf_probe_read(&sport, sizeof(sport), &sk->__sk_common.skc_num);
+	int len = (int) PT_REGS_PARM3(ctx);
+	if (len < 0) {
+		return 0;
+	}
 
-	if (bpf_ntohs(dport) == 53 || bpf_ntohs(sport) == 53) {
-		unsigned char *data = BPF_CORE_READ(skb, data);
-		size_t buflen = BPF_CORE_READ(skb, len);
+	unsigned char *head = sk_buff_head(skb);
+	if (!head) {
+		return 0;
+	}
 
-		bpf_printk("\tWe Have a DNS BUFLEN=%d pkgdata=%x", buflen, data);
-		
-		// Access UDP header for payload offset calculation
-    		//struct udphdr *udphdr = (struct udphdr *)(skb->data);
-    		//unsigned int payload_offset = sizeof(struct udphdr);
+	u16 net_head = sk_buff_network_header(skb);
+	if (!net_head) {
+		return 0;
+	}
 
-    		//// Access first 12 bytes of potential DNS query (assuming standard format)
-    		//unsigned char *data = BPF_CORE_READ(skb, data + payload_offset);
-    		//unsigned char query_type = data[1]; // Assuming query type is in the second byte
+	struct iphdr iph = {};
+	int ret = bpf_probe_read(&iph, sizeof(iph), (struct iph *)(head + net_head));
+	if (ret) {
+		bpf_printk("ERR reading iph");
+		return ret;
+	}
 
-    		// Print limited information (adjust printing logic as needed)
-    		//bpf_printk("\tWe Have a DNS - dport=%d sport=%d query_type=%d",bpf_ntohs(dport), bpf_ntohs(sport), query_type);
+	bpf_printk("checking IP header version=%d protocol=%d", iph.version, iph.protocol);
+
+	struct udphdr udph = {};
+	ret = bpf_probe_read(&udph, sizeof(udph), (struct udph *)(head + net_head + sizeof(iph)));
+	if (ret) {
+		bpf_printk("ERR reading udph");
+		return ret;
+	}
+
+	bpf_printk("checking UDP header source=%d dest=%d Len=%d", bpf_ntohs(udph.source), bpf_ntohs(udph.dest), bpf_ntohs(udph.len));
+
+	if (bpf_ntohs(udph.source) == 53 || bpf_ntohs(udph.dest) == 53) {
+		// get the dns header
+		bpf_printk("We have a DNS package");
+		struct dns_hdr dnsh = {};
+		ret = bpf_probe_read(&dnsh, sizeof(dnsh), (struct dnsh *)(head + net_head + sizeof(iph)+ sizeof(udph)));
+		if (ret) {
+			bpf_printk("ERR reading dnsh");
+			return ret;
+		}
+
+		// sanity check 
+		// qr == 1 message is response 
+		// opcode == 0 standard query
+		if (dnsh.qr == 1 && dnsh.opcode == 0) {
+			bpf_printk(" => We have a dns response | Transaction ID=0x%x", bpf_ntohs(dnsh.transaction_id));
+
+			// read the domain name
+			char buff[256];
+			int ret = bpf_probe_read(&buff, sizeof(buff), (char *)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh)));
+			if (ret) {
+				bpf_printk("ERR reading dns query");
+				return ret;
+			}
+			
+			size_t len = __strlen(buff);
+
+			// read record type and class
+			uint32_t b;
+			ret = bpf_probe_read(&b, sizeof(b), (uint32_t *)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh) + (len + 1)));
+			if (ret) {
+				bpf_printk("ERR reading dns query (fields)");
+				return ret;
+			}
+
+			uint16_t record_type = bpf_ntohs(b & 0x0000FFFF);
+			uint16_t class = (bpf_ntohs(b >> 16) & 0x0000FFFF);
+			bpf_printk("debug dns query field :: Record=%x Class=%x", record_type, class);
+
+			// check if record type == A and class == IN
+			if (record_type == 1 && class == 1) {
+				// we have a HOST record
+				bpf_printk("   => We have a HOST record | Record Type=0x%x and Class=0x%x", record_type, class);
+				bpf_printk("   => AnswerCount=%d Domain: %s", bpf_ntohs(dnsh.ans_count), buff);
+
+				unsigned long offset = (unsigned long)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh) + (len + 1) + sizeof(b));
+				struct dns_response resp = {};
+				ret = bpf_probe_read(&resp, sizeof(resp), (struct resp *)(offset));
+				if (ret) {
+					bpf_printk("ERR reading dns response");
+					return ret;
+				}
+
+				bpf_printk("debug dns response :: Record=%d Class=%d", resp.record_type, resp.class);
+			}
+		}
 	}
 
 	return 0;
