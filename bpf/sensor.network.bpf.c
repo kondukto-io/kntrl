@@ -50,6 +50,40 @@ struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
 } ipv4_closed_events SEC(".maps");
 
+
+static __always_inline int parse_dns_response(int ans_count, unsigned long offset) {
+	unsigned long new_offset = offset;
+
+	for (int i = 0; i < 10; i++) {
+		if (ans_count == i) break;
+
+		struct dns_response resp = {};
+		int ret = bpf_probe_read(&resp, sizeof(resp), (struct resp *)(new_offset));
+		if (ret) {
+			bpf_printk("ERR reading dns response (answer)");
+			return ret;
+		}
+
+		bpf_printk("   => [%d] debug dns response :: Record=%x(%d) Class=%x(%d) TTL=%d Len=%d | ANS_COUNT=%d", i, 
+				resp.record_type,bpf_ntohs(resp.record_type), resp.class, bpf_ntohs(resp.class),  
+				bpf_ntohs(resp.ttl), bpf_ntohs(resp.data_length), ans_count);
+
+		// if TYPE A (5) and CLASS IN (0x0001)
+		if (bpf_ntohs(resp.record_type) == 1 && bpf_ntohs(resp.class) == 1) {
+			uint32_t address;
+			ret = bpf_probe_read(&address, sizeof(address), (uint32_t *)(new_offset + sizeof(resp)));
+			if (ret) {
+				bpf_printk("ERR reading address (answer)");
+				return ret;
+			}
+			bpf_printk("    => address=%x", address);
+		}
+		new_offset = (new_offset + sizeof(resp) + bpf_ntohs(resp.data_length));
+	}
+
+	return 0;
+}
+
 // Taken from: 
 // https://github.com/DataDog/datadog-agent/blob/main/pkg/network/ebpf/c/skb.h
 static __always_inline unsigned char* sk_buff_head(struct sk_buff *skb) {
@@ -70,6 +104,8 @@ static __always_inline u16 __strlen(char *ptr) {
 	for (int i = 0; i < 256; i++) {
 		if (*ptr == '\0')
 			break;
+		if (*ptr < 32 || *ptr > 126) 
+			*ptr = '.';
 		len++; 
 		ptr++;
 	}
@@ -109,11 +145,6 @@ static int __attribute__((always_inline)) handle_event(struct ipv4_event_t *evt4
 
 SEC("kprobe/skb_consume_udp")
 int kprobe__skb_consume_udp(struct pt_regs *ctx) {
-	//struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
-	//if (!sk) {
-	//	return 0;
-	//}
-
 	struct sk_buff *skb = (struct sk_buff *)PT_REGS_PARM2(ctx);
 	if (!skb) {
 		return 0;
@@ -141,7 +172,7 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 		return ret;
 	}
 
-	bpf_printk("checking IP header version=%d protocol=%d", iph.version, iph.protocol);
+	//bpf_printk("checking IP header version=%d protocol=%d", iph.version, iph.protocol);
 
 	struct udphdr udph = {};
 	ret = bpf_probe_read(&udph, sizeof(udph), (struct udph *)(head + net_head + sizeof(iph)));
@@ -150,11 +181,10 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 		return ret;
 	}
 
-	bpf_printk("checking UDP header source=%d dest=%d Len=%d", bpf_ntohs(udph.source), bpf_ntohs(udph.dest), bpf_ntohs(udph.len));
+	//bpf_printk("checking UDP header source=%d dest=%d Len=%d", bpf_ntohs(udph.source), bpf_ntohs(udph.dest), bpf_ntohs(udph.len));
 
 	if (bpf_ntohs(udph.source) == 53 || bpf_ntohs(udph.dest) == 53) {
 		// get the dns header
-		bpf_printk("We have a DNS package");
 		struct dns_hdr dnsh = {};
 		ret = bpf_probe_read(&dnsh, sizeof(dnsh), (struct dnsh *)(head + net_head + sizeof(iph)+ sizeof(udph)));
 		if (ret) {
@@ -168,7 +198,7 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 		if (dnsh.qr == 1 && dnsh.opcode == 0) {
 			bpf_printk(" => We have a dns response | Transaction ID=0x%x", bpf_ntohs(dnsh.transaction_id));
 
-			// read the domain name
+			// read the domain name (response)
 			char buff[256];
 			int ret = bpf_probe_read(&buff, sizeof(buff), (char *)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh)));
 			if (ret) {
@@ -176,35 +206,29 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 				return ret;
 			}
 			
+			// TODO: check domain name (allowed hosts)
 			size_t len = __strlen(buff);
 
-			// read record type and class
-			uint32_t b;
-			ret = bpf_probe_read(&b, sizeof(b), (uint32_t *)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh) + (len + 1)));
+			// read record type and class (queries)
+			uint32_t rc;
+			ret = bpf_probe_read(&rc, sizeof(rc), (uint32_t *)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh) + (len + 1)));
 			if (ret) {
 				bpf_printk("ERR reading dns query (fields)");
 				return ret;
 			}
 
-			uint16_t record_type = bpf_ntohs(b & 0x0000FFFF);
-			uint16_t class = (bpf_ntohs(b >> 16) & 0x0000FFFF);
-			bpf_printk("debug dns query field :: Record=%x Class=%x", record_type, class);
+			uint16_t record_type = bpf_ntohs(rc & 0x0000FFFF);
+			uint16_t class = (bpf_ntohs(rc >> 16) & 0x0000FFFF);
 
-			// check if record type == A and class == IN
+			// record type == A and class == IN
 			if (record_type == 1 && class == 1) {
 				// we have a HOST record
 				bpf_printk("   => We have a HOST record | Record Type=0x%x and Class=0x%x", record_type, class);
 				bpf_printk("   => AnswerCount=%d Domain: %s", bpf_ntohs(dnsh.ans_count), buff);
 
-				unsigned long offset = (unsigned long)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh) + (len + 1) + sizeof(b));
-				struct dns_response resp = {};
-				ret = bpf_probe_read(&resp, sizeof(resp), (struct resp *)(offset));
-				if (ret) {
-					bpf_printk("ERR reading dns response");
-					return ret;
-				}
+				unsigned long offset = (unsigned long)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh) + (len + 1) + sizeof(rc));
 
-				bpf_printk("debug dns response :: Record=%d Class=%d", resp.record_type, resp.class);
+				parse_dns_response(bpf_ntohs(dnsh.ans_count), offset);
 			}
 		}
 	}
