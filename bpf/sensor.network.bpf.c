@@ -76,7 +76,14 @@ static __always_inline int parse_dns_response(int ans_count, unsigned long offse
 				bpf_printk("ERR reading address (answer)");
 				return ret;
 			}
-			bpf_printk("    => address=%x", address);
+
+			// convertion 
+			u8 addr[16];
+			__builtin_memcpy(&addr, &address, sizeof(address));
+
+			__be32 *p32;
+			p32 = (__be32 *)addr;
+			bpf_printk("    => address=%x (%pI4)", address, p32);
 		}
 		new_offset = (new_offset + sizeof(resp) + bpf_ntohs(resp.data_length));
 	}
@@ -199,6 +206,7 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 			bpf_printk(" => We have a dns response | Transaction ID=0x%x", bpf_ntohs(dnsh.transaction_id));
 
 			// read the domain name (response)
+			// MAX_DNSNAME
 			char buff[256];
 			int ret = bpf_probe_read(&buff, sizeof(buff), (char *)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh)));
 			if (ret) {
