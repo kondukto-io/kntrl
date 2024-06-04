@@ -2,6 +2,7 @@
 
 #include "headers/vmlinux.h"
 #include <stdbool.h>
+#include <string.h>
 
 #include "headers/bpf_helpers.h"
 #include "headers/bpf_core_read.h"
@@ -84,6 +85,9 @@ static __always_inline int parse_dns_response(int ans_count, unsigned long offse
 			__be32 *p32;
 			p32 = (__be32 *)addr;
 			bpf_printk("    => address=%x (%pI4)", address, p32);
+
+			__u32 val = 0;
+			bpf_map_update_elem(&allow_map, &addr, &val, BPF_ANY);
 		}
 		new_offset = (new_offset + sizeof(resp) + bpf_ntohs(resp.data_length));
 	}
@@ -118,6 +122,20 @@ static __always_inline u16 __strlen(char *ptr) {
 	}
 
 	return len;
+}
+
+
+static __always_inline int __is_allowed_host(char *hostname) {
+	const char *allowed_hosts[] = {"www.example.com", ".download.kondukto.io"};
+
+	for (int i = 0; i < 2; i++) {
+		if (strcmp(hostname, allowed_hosts[i]) == 0) {
+			bpf_printk("\t\t\t ||||| we have a match=%s", hostname);
+			return 1;
+		}
+	}
+
+	return 0;
 }
 
 static int __attribute__((always_inline)) handle_event(struct ipv4_event_t *evt4, struct sockaddr *address, uint8_t proto) {
@@ -216,6 +234,13 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 			
 			// TODO: check domain name (allowed hosts)
 			size_t len = __strlen(buff);
+
+			//__is_allowed_host(buff);
+			if (!__is_allowed_host(buff))
+			{
+				bpf_printk(" ||||| strcmp == 0 [%s] |||||| exiting...", buff);
+				return 0;
+			}
 
 			// read record type and class (queries)
 			uint32_t rc;
