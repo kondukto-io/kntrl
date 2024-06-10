@@ -105,7 +105,7 @@ func Run(cmd cobra.Command) error {
 		return fmt.Errorf("invalid mode: %s", tracerMode)
 	}
 
-	allowMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllow]
+	allowedIPMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedIP]
 	{
 		for _, ipstr := range cmddata.AllowedIPs {
 			ip := ipstr.To4()
@@ -116,10 +116,21 @@ func Run(cmd cobra.Command) error {
 				ipUint32 = binary.LittleEndian.Uint32(ip)
 
 			}
-			if err := allowMap.Put(ipUint32, uint32(1)); err != nil {
-				logger.Log.Fatalf("failed to update allow list (map): %v", err)
+			if err := allowedIPMap.Put(ipUint32, uint32(1)); err != nil {
+				logger.Log.Fatalf("failed to update allow ip (map): %v", err)
 			}
 		}
+	}
+
+	allowedHostMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedIP]
+	{
+		for _, hosts := range cmddata.AllowedHosts {
+			h := binary.LittleEndian.Uint32([]byte(hosts + "\x00"))
+			if err := allowedHostMap.Put(h, uint32(1)); err != nil {
+				logger.Log.Fatalf("failed to update allow host (map): %v", err)
+			}
+		}
+
 	}
 
 	ipv4EventMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapIPV4Events]
@@ -274,7 +285,7 @@ func Run(cmd cobra.Command) error {
 			}
 			if result {
 				policyStatus = domain.EventPolicyStatusPass
-				if err := allowMap.Put(event.Daddr, uint32(1)); err != nil {
+				if err := allowedIPMap.Put(event.Daddr, uint32(1)); err != nil {
 					logger.Log.Fatalf("failed to update allow list (map): %v", err)
 				}
 				logger.Log.Infof("ip [%d] added into allowed list", event.Daddr)
@@ -311,7 +322,7 @@ func parseFlags(cmd *cobra.Command) (*domain.Data, error) {
 	allowedIPAddrFlag := cmd.Flag("allowed-ips")
 
 	if allowedIPAddrFlag.Value.String() == "" && allowedHostsFlag.Value.String() == "" {
-		return nil, errors.New("no allowed hosts or IP addresses provided")
+		return nil, errors.New("no allowed hostname or IP addresses provided")
 	}
 
 	ghmeta, err := cmd.Flags().GetBool("allow-github-meta")

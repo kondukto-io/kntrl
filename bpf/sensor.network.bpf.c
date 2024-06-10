@@ -1,6 +1,7 @@
 //go:build ignore
 
 #include "headers/vmlinux.h"
+#include <asm-generic/errno-base.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -13,14 +14,23 @@
 #define AF_INET 2
 #define TASK_COMM_LEN 16
 #define MAX_ENTIRES 1024
+#define MAX_HOSTNAME_LEN 256
 #define MODE_ALLOW 1
 
 #define ETH_P_IP	0x0800		/* Internet Protocol packet	*/
 
 ///* Map for allowed IP addresses (hosts) from userspace */
-struct bpf_map_def SEC("maps") allow_map = {
+struct bpf_map_def SEC("maps") allowed_ip_map = {
 	.type = BPF_MAP_TYPE_HASH,
 	.key_size = sizeof(__u32),
+	.value_size = sizeof(__u32),
+	.max_entries = MAX_ENTIRES,
+};
+
+struct bpf_map_def SEC("maps") allowed_hosts_map = {
+	.type = BPF_MAP_TYPE_HASH,
+	//.key_size = sizeof(char) * MAX_HOSTNAME_LEN,
+	.key_size = 256,
 	.value_size = sizeof(__u32),
 	.max_entries = MAX_ENTIRES,
 };
@@ -79,15 +89,17 @@ static __always_inline int parse_dns_response(int ans_count, unsigned long offse
 			}
 
 			// convertion 
-			u8 addr[16];
-			__builtin_memcpy(&addr, &address, sizeof(address));
+			//u8 addr[16];
+			//__builtin_memcpy(&addr, &address, sizeof(address));
 
-			__be32 *p32;
-			p32 = (__be32 *)addr;
-			bpf_printk("    => address=%x (%pI4)", address, p32);
+			//__be32 *p32;
+			//p32 = (__be32 *)addr;
+			//u32 pid = bpf_get_current_pid_tgid() >> 32;
+			//bpf_printk("    PID=%d => address=%x (%pI4)", pid, address, p32);
+			//bpf_map_update_elem(&allowed_ip_map, &addr, &val, BPF_ANY);
 
 			__u32 val = 0;
-			bpf_map_update_elem(&allow_map, &addr, &val, BPF_ANY);
+			bpf_map_update_elem(&allowed_ip_map, &address, &val, BPF_ANY);
 		}
 		new_offset = (new_offset + sizeof(resp) + bpf_ntohs(resp.data_length));
 	}
@@ -126,14 +138,8 @@ static __always_inline u16 __strlen(char *ptr) {
 
 
 static __always_inline int __is_allowed_host(char *hostname) {
-	const char *allowed_hosts[] = {"www.example.com", ".download.kondukto.io"};
-
-	for (int i = 0; i < 2; i++) {
-		if (strcmp(hostname, allowed_hosts[i]) == 0) {
-			bpf_printk("\t\t\t ||||| we have a match=%s", hostname);
-			return 1;
-		}
-	}
+	if (bpf_map_lookup_elem(&allowed_hosts_map, hostname) != NULL)
+		return 1;
 
 	return 0;
 }
@@ -331,7 +337,7 @@ int inet_sock_set_state(void *ctx) {
 	bpf_printk("tracepoint:=%d oldstate=%d newstate=%d daddr=%pI4", pid, oldstate, newstate, p32);
 
 	if (oldstate == BPF_TCP_ESTABLISHED){
-		bpf_map_update_elem(&allow_map, &daddr, &val, BPF_ANY);
+		bpf_map_update_elem(&allowed_ip_map, &daddr, &val, BPF_ANY);
 	}
 
 	return 0;
@@ -347,7 +353,7 @@ inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 
 	// refactor
 	if (iph.version == 4){
-		bool pass = bpf_map_lookup_elem(&allow_map, &iph.saddr) || bpf_map_lookup_elem(&allow_map, &iph.daddr);
+		bool pass = bpf_map_lookup_elem(&allowed_ip_map, &iph.saddr) || bpf_map_lookup_elem(&allowed_ip_map, &iph.daddr);
 
 		__u32 key = 0;
 		__u32 *mode;

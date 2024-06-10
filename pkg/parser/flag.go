@@ -49,11 +49,12 @@ func parseAllowedIPAddr(ips string) (iplist []net.IP) {
 
 func parseAllowedHosts(hosts string) (hl []string) {
 	for _, host := range strings.Split(hosts, ",") {
-		alias, err := net.LookupCNAME(host)
-		if err != nil {
-			continue
-		}
-		hl = append(hl, strings.TrimRight(alias, "."))
+		hl = append(hl, host)
+		//alias, err := net.LookupCNAME(host)
+		//if err != nil {
+		//	continue
+		//}
+		//hl = append(hl, strings.TrimRight(alias, "."))
 	}
 
 	return hl
