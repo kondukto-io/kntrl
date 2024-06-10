@@ -88,15 +88,9 @@ static __always_inline int parse_dns_response(int ans_count, unsigned long offse
 				return ret;
 			}
 
-			// convertion 
-			//u8 addr[16];
-			//__builtin_memcpy(&addr, &address, sizeof(address));
-
-			//__be32 *p32;
-			//p32 = (__be32 *)addr;
+			// TODO: 
+			// get pid and populate a map to send A records to perf array
 			//u32 pid = bpf_get_current_pid_tgid() >> 32;
-			//bpf_printk("    PID=%d => address=%x (%pI4)", pid, address, p32);
-			//bpf_map_update_elem(&allowed_ip_map, &addr, &val, BPF_ANY);
 
 			__u32 val = 0;
 			bpf_map_update_elem(&allowed_ip_map, &address, &val, BPF_ANY);
@@ -262,8 +256,8 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 			// record type == A and class == IN
 			if (record_type == 1 && class == 1) {
 				// we have a HOST record
-				bpf_printk("   => We have a HOST record | Record Type=0x%x and Class=0x%x", record_type, class);
-				bpf_printk("   => AnswerCount=%d Domain: %s", bpf_ntohs(dnsh.ans_count), buff);
+				//bpf_printk("   => We have a HOST record | Record Type=0x%x and Class=0x%x", record_type, class);
+				//bpf_printk("   => AnswerCount=%d Domain: %s", bpf_ntohs(dnsh.ans_count), buff);
 
 				unsigned long offset = (unsigned long)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh) + (len + 1) + sizeof(rc));
 

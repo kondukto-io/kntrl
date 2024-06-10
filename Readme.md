@@ -2,7 +2,7 @@
 
 `kntrl` is an eBPF based runtime agent that monitors and prevents anomalous behaviour defined by you on your pipeline. kntrl achieves this by monitoring kernel calls, and denying access as soon as your defined behaviour is detected. Refer to this [presentation](https://docs.google.com/presentation/d/1nmbqGfIxp9UyxlfT5EJyQsEWtQaXVoWD9Qjj1MJevuk/edit?usp=sharing) to dive deeper into how we are achieving what kntrl does.
 
-It can work as a single binary (`kntrl`) or with a docker runner (`docker.io/kondukto/kntrl:0.1.0`).
+It can work as a single binary (`kntrl`) or with a docker runner (`docker.io/kondukto/kntrl:0.1.2`).
 
 ## Installation
 ### Linux 
@@ -17,7 +17,7 @@ docker pull kondukto/kntrl:latest
 
 To pull a specific version:
 ```
-docker pull kondukto/kntrl:0.1.0
+docker pull kondukto/kntrl:0.1.2
 ```
 
 ## Using kntrl
@@ -39,7 +39,7 @@ OR with the docker:
     --cgroupns=host \
     --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
     --volume /tmp:/tmp \
-    --rm docker.io/kondukto/kntrl:0.1.0 run --mode=trace --allowed-hosts=kondukto.io,download.kondukto.io 
+    --rm docker.io/kondukto/kntrl:0.1.2 run --mode=trace --allowed-hosts=kondukto.io,download.kondukto.io 
 ```
 
 This action will deploy kntrl into any GitHub Actions build.
@@ -87,7 +87,7 @@ The agent supports the following parameters:
   --cgroupns=host \
   --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
   --volume /tmp:/tmp \
-  --rm docker.io/kondukto/kntrl:0.1.0 \
+  --rm docker.io/kondukto/kntrl:0.1.2 \
   --mode=monitor 
 ```
 
@@ -101,7 +101,7 @@ The agent supports the following parameters:
   --cgroupns=host \
   --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
   --volume /tmp:/tmp \
-  --rm docker.io/kondukto/kntrl:0.1.0 \
+  --rm docker.io/kondukto/kntrl:0.1.2 \
   --mode=trace --allowed-hosts=download.kondukto.io, .github.com  
 ```
 
