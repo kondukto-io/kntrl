@@ -2,19 +2,9 @@ package utils
 
 import "strings"
 
-// OneOf returns true if the given string is one of the given values
-func OneOf(s string, values []string) bool {
-	for _, v := range values {
-		if s == v {
-			return true
-		}
-	}
-
-	return false
-}
-
-// OneOfInt32 returns true if the given string is one of the given values
-func OneOfInt32(s int32, values []int32) bool {
+// OneOf returns true if the given value is in the given list
+// Note: This func is not used in the project.
+func OneOf[T comparable](s T, values []T) bool {
 	for _, v := range values {
 		if s == v {
 			return true

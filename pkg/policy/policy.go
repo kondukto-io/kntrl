@@ -85,7 +85,12 @@ func (p *Policy) Eval(ctx context.Context, input map[string]interface{}) (bool, 
 		return false, fmt.Errorf("failed to eval rego query: %w", err)
 	}
 
-	// TODO: check for nil pointer
+	if len(result) == 0 ||
+		len(result[0].Expressions) == 0 ||
+		result[0].Expressions[0].Value == nil {
+		return false, fmt.Errorf("failed to get result from rego query")
+	}
+
 	return result[0].Expressions[0].Value.(bool), nil
 }
 
@@ -94,8 +99,11 @@ func (p *Policy) EvalEvent(ctx context.Context, event domain.ReportEvent) (bool,
 	if err != nil {
 		return false, err
 	}
-	var outmap map[string]any
-	json.Unmarshal(data, &outmap)
+
+	outmap, err := unmarshal(data)
+	if err != nil {
+		return false, err
+	}
 
 	return p.Eval(ctx, outmap)
 }
