@@ -3,7 +3,6 @@ package parser
 import (
 	"bufio"
 	"net"
-	"net/url"
 	"os"
 	"strings"
 
@@ -50,12 +49,12 @@ func parseAllowedIPAddr(ips string) (iplist []net.IP) {
 
 func parseAllowedHosts(hosts string) (hl []string) {
 	for _, host := range strings.Split(hosts, ",") {
-		if res, err := url.Parse(host); err != nil && res.Host != "" {
-			hl = append(hl, res.Host)
+		if parts := strings.Split(host, "."); len(parts) > 1 {
+			hl = append(hl, host)
 		}
 	}
 
-	return hl
+	return
 }
 
 // find a better solution
