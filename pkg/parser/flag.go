@@ -3,6 +3,7 @@ package parser
 import (
 	"bufio"
 	"net"
+	"net/url"
 	"os"
 	"strings"
 
@@ -49,12 +50,9 @@ func parseAllowedIPAddr(ips string) (iplist []net.IP) {
 
 func parseAllowedHosts(hosts string) (hl []string) {
 	for _, host := range strings.Split(hosts, ",") {
-		hl = append(hl, host)
-		//alias, err := net.LookupCNAME(host)
-		//if err != nil {
-		//	continue
-		//}
-		//hl = append(hl, strings.TrimRight(alias, "."))
+		if res, err := url.Parse(host); err != nil && res.Host != "" {
+			hl = append(hl, res.Host)
+		}
 	}
 
 	return hl
@@ -85,9 +83,6 @@ func getDNSServers() (hosts []string, ips []net.IP) {
 	}
 	defer file.Close()
 
-	var srvhosts []string
-	var srvips []net.IP
-
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -95,9 +90,9 @@ func getDNSServers() (hosts []string, ips []net.IP) {
 
 		if len(fields) >= 2 && fields[0] == "nameserver" {
 			if ok := net.ParseIP(fields[1]); ok == nil {
-				srvhosts = append(srvhosts, fields[1])
+				hosts = append(hosts, fields[1])
 			} else {
-				srvips = append(srvips, net.ParseIP(fields[1]))
+				ips = append(ips, net.ParseIP(fields[1]))
 			}
 		}
 	}
@@ -106,5 +101,5 @@ func getDNSServers() (hosts []string, ips []net.IP) {
 		return nil, nil
 	}
 
-	return srvhosts, srvips
+	return
 }
