@@ -107,7 +107,7 @@ func (r *Reporter) PrintReportTable() {
 	}
 
 	for _, v := range r.events {
-		res := make([]string, 0)
+		res := make([]string, 0, len(v.Domains)+5)
 		res = append(res, strconv.FormatUint(uint64(v.ProcessID), 10))
 		res = append(res, v.TaskName)
 		res = append(res, v.Protocol)
