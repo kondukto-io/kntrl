@@ -31,7 +31,7 @@ builds:
     no_unique_dist_dir: true
 
 archives:
-  - format: binary
+  - formats: [ 'binary' ]
     #strip_binary_directory: true
     name_template: >-
       {{ .Binary }}.{{ .Arch }}
