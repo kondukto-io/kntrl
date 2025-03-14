@@ -72,12 +72,12 @@ func Run(cmd cobra.Command) error {
 		return fmt.Errorf("error converting dataobj: %w", err)
 	}
 
-	p, err := policy.New(bundleFS, dataObj)
+	bundlePolicy, err := policy.New(bundleFS, dataObj)
 	if err != nil {
 		return fmt.Errorf("policy init error: %w", err)
 	}
 
-	p.AddQuery("data.kntrl.policy")
+	bundlePolicy.AddQuery("data.kntrl.policy")
 
 	var ebpfClient = ebpfman.New()
 	if err := ebpfClient.Load(prog); err != nil {
@@ -264,7 +264,7 @@ func Run(cmd cobra.Command) error {
 
 		// policy logic
 		if tracerMode != domain.TracerModeMonitor {
-			result, err := p.EvalEvent(context.Background(), reportEvent)
+			result, err := bundlePolicy.EvalEvent(context.Background(), reportEvent)
 			if err != nil {
 				logger.Log.Debugf("policy eval failed: %v", err)
 			}
