@@ -310,7 +310,6 @@ func updateAllowedIPMaps(allowedIPMap *ebpf.Map, arg *domain.Data) error {
 			ipUint32 = binary.LittleEndian.Uint32(ip[12:16])
 		} else {
 			ipUint32 = binary.LittleEndian.Uint32(ip)
-
 		}
 		if err := allowedIPMap.Put(ipUint32, uint32(1)); err != nil {
 			return err
