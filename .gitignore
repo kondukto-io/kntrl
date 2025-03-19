@@ -4,9 +4,11 @@
 # ignore object files
 internal/**/*.o
 internal/**/*x86.go
+kntrl
 
 dist/
 \.idea/
 \.vscode/
 
 .DS_Store
+

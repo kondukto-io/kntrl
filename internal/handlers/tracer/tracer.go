@@ -72,12 +72,12 @@ func Run(cmd cobra.Command) error {
 		return fmt.Errorf("error converting dataobj: %w", err)
 	}
 
-	p, err := policy.New(bundleFS, dataObj)
+	bundlePolicy, err := policy.New(bundleFS, dataObj)
 	if err != nil {
 		return fmt.Errorf("policy init error: %w", err)
 	}
 
-	p.AddQuery("data.kntrl.policy")
+	bundlePolicy.AddQuery("data.kntrl.policy")
 
 	var ebpfClient = ebpfman.New()
 	if err := ebpfClient.Load(prog); err != nil {
@@ -106,31 +106,16 @@ func Run(cmd cobra.Command) error {
 	}
 
 	allowedIPMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedIP]
-	{
-		for _, ipstr := range cmddata.AllowedIPs {
-			ip := ipstr.To4()
-			var ipUint32 uint32
-			if len(ip) > 16 {
-				ipUint32 = binary.LittleEndian.Uint32(ip[12:16])
-			} else {
-				ipUint32 = binary.LittleEndian.Uint32(ip)
+	err = updateAllowedIPMaps(allowedIPMap, cmddata)
+	if err != nil {
+		logger.Log.Fatalf("failed to update allow ip (map): %v", err)
 
-			}
-			if err := allowedIPMap.Put(ipUint32, uint32(1)); err != nil {
-				logger.Log.Fatalf("failed to update allow ip (map): %v", err)
-			}
-		}
 	}
 
 	allowedHostMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedIP]
-	{
-		for _, hosts := range cmddata.AllowedHosts {
-			h := binary.LittleEndian.Uint32([]byte(hosts + "\x00"))
-			if err := allowedHostMap.Put(h, uint32(1)); err != nil {
-				logger.Log.Fatalf("failed to update allow host (map): %v", err)
-			}
-		}
-
+	err = updateAllowedHostMap(allowedHostMap, cmddata)
+	if err != nil {
+		logger.Log.Fatalf("failed to update allow host (map): %v", err)
 	}
 
 	ipv4EventMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapIPV4Events]
@@ -279,7 +264,7 @@ func Run(cmd cobra.Command) error {
 
 		// policy logic
 		if tracerMode != domain.TracerModeMonitor {
-			result, err := p.EvalEvent(context.Background(), reportEvent)
+			result, err := bundlePolicy.EvalEvent(context.Background(), reportEvent)
 			if err != nil {
 				logger.Log.Debugf("policy eval failed: %v", err)
 			}
@@ -314,6 +299,33 @@ EXIT:
 	<-done
 	report.PrintReportTable()
 	report.Close()
+	return nil
+}
+
+func updateAllowedIPMaps(allowedIPMap *ebpf.Map, arg *domain.Data) error {
+	for _, ipstr := range arg.AllowedIPs {
+		ip := ipstr.To4()
+		var ipUint32 uint32
+		if len(ip) > 16 {
+			ipUint32 = binary.LittleEndian.Uint32(ip[12:16])
+		} else {
+			ipUint32 = binary.LittleEndian.Uint32(ip)
+
+		}
+		if err := allowedIPMap.Put(ipUint32, uint32(1)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func updateAllowedHostMap(allowedHostMap *ebpf.Map, arg *domain.Data) error {
+	for _, hosts := range arg.AllowedHosts {
+		h := binary.LittleEndian.Uint32([]byte(hosts + "\x00"))
+		if err := allowedHostMap.Put(h, uint32(1)); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
