@@ -18,6 +18,11 @@ var testCases = map[string]struct {
 		[]byte(`{"pid": 2806,"task_name": "curl","proto": "tcp","daddr": "192.168.0.1","dport": 443,"domains": [".kondukto.io"]}`),
 		true,
 	},
+	"disallow_local_ip_ranges": {
+		[]byte(`{"allowed_hosts":["foo.com"], "allowed_ip_addr":["1.1.1.1"], "allow_github_meta": false, "allow_local_ip_ranges": false}`),
+		[]byte(`{"pid": 2806,"task_name": "curl","proto": "tcp","daddr": "192.168.0.1","dport": 443,"domains": [".kondukto.io"]}`),
+		false,
+	},
 	"allow_ip_addr": {
 		[]byte(`{"allowed_hosts":["foo.com"], "allowed_ip_addr":["1.1.1.1"], "allow_github_meta": false, "allow_local_ip_ranges": true}`),
 		[]byte(`{"pid": 2806,"task_name": "curl","proto": "tcp","daddr": "1.1.1.1","dport": 443,"domains": [".kondukto.io"]}`),
@@ -37,6 +42,11 @@ var testCases = map[string]struct {
 		[]byte(`{"allowed_hosts":["foo.com"], "allowed_ip_addr":["1.1.1.1"], "allow_github_meta": true, "allow_local_ip_ranges": false}`),
 		[]byte(`{"pid":1636,"task_name":".NET ThreadPool","proto":"tcp","daddr":"20.102.39.57","dport":443,"domains":["."]}`),
 		true,
+	},
+	"disallow_github_meta": {
+		[]byte(`{"allowed_hosts":["foo.com"], "allowed_ip_addr":["1.1.1.1"], "allow_github_meta": false, "allow_local_ip_ranges": false}`),
+		[]byte(`{"pid":1636,"task_name":".NET ThreadPool","proto":"tcp","daddr":"20.102.39.57","dport":443,"domains":["."]}`),
+		false,
 	},
 }
 

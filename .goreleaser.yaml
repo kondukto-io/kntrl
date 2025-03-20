@@ -6,6 +6,7 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 # vim: set ts=2 sw=2 tw=0 fo=cnqoj
 
+version: 2
 before:
   hooks:
     # You may remove this if you don't use go modules.
@@ -30,10 +31,10 @@ builds:
     no_unique_dist_dir: true
 
 archives:
-  - format: tar.gz
-    # this name template makes the OS and Arch compatible with the results of `uname`.
+  - formats: [ 'binary' ]
+    #strip_binary_directory: true
     name_template: >-
-      {{ .Binary }}
+      {{ .Binary }}.{{ .Arch }}
     files:
       - Readme.md 
       - LICENSE
@@ -45,5 +46,13 @@ changelog:
       - "^docs:"
       - "^test:"
 
+dockers:
+  - image_templates:
+    - "kondukto/kntrl:latest"
+    - "kondukto/kntrl:{{ .Tag }}"
+    dockerfile: Dockerfile
+    build_flag_templates:
+    - "--pull"
+    - "--platform=linux/amd64"
 #sboms:
 #  - artifacts: archive
