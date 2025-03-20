@@ -267,11 +267,13 @@ func Run(cmd cobra.Command) error {
 			result, err := bundlePolicy.EvalEvent(context.Background(), reportEvent)
 			if err != nil {
 				logger.Log.Debugf("policy eval failed: %v", err)
+				return err
 			}
 			if result {
 				policyStatus = domain.EventPolicyStatusPass
 				if err := allowedIPMap.Put(event.Daddr, uint32(1)); err != nil {
 					logger.Log.Fatalf("failed to update allow list (map): %v", err)
+					return err
 				}
 				logger.Log.Infof("ip [%d] added into allowed list", event.Daddr)
 
