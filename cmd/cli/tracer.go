@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -17,11 +18,17 @@ func initTracerCommand() *cobra.Command {
 		Use:   "run",
 		Short: "Starts the TCP/UDP tracer",
 		Run: func(cmd *cobra.Command, args []string) {
+			daemonMode, _ := cmd.Flags().GetBool("daemonize")
+			if daemonMode {
+				if err := daemonize("start", os.Args[1:]); err != nil {
+					qwe(exitCodeError, err, "failed to daemonize")
+				}
+				return
+			}
+
 			if err := tracer.Run(*cmd); err != nil {
 				qwe(exitCodeError, err, "failed to run tracer")
 			}
-			// if daemonize == true
-			// call func daemonize ( args... )
 		},
 	}
 
@@ -42,13 +49,86 @@ func daemonize(command string, args []string) error {
 	case "start":
 		if _, err := os.Stat(pidfile); err == nil {
 			qwm(1, "Already running or pidfile exist.")
+			return err
 		}
 
-		cmd := exec.Command(os.Args[0], args...)
-		// sudo ./kntrl run --mode=trace --allowed-hosts=download.kondukto.io --allow-github-meta=true
-		cmd.Start()
+		filteredArgs := make([]string, 0, len(args))
+		for i := 0; i < len(args); i++ {
+			if args[i] == "--daemonize" {
+				continue
+			}
+			filteredArgs = append(filteredArgs, args[i])
+		}
+
+		cmd := exec.Command(os.Args[0], filteredArgs...)
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+		cmd.Stdin = nil
+
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+
 		savePID(cmd.Process.Pid)
-		qwm(0, "process started")
+		qwm(0, "Process started with PID: "+strconv.Itoa(cmd.Process.Pid))
+
+	case "stop":
+		data, err := os.ReadFile(pidfile)
+		if err != nil {
+			return err
+		}
+
+		pid, err := strconv.Atoi(string(data))
+		if err != nil {
+			return err
+		}
+
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			return err
+		}
+
+		if err := process.Kill(); err != nil {
+			return err
+		}
+
+		if err := os.Remove(pidfile); err != nil {
+			return err
+		}
+
+		qwm(0, "Process stopped")
+
+	case "status":
+		if _, err := os.Stat(pidfile); err != nil {
+			qwm(0, "Not running")
+			return nil
+		}
+
+		data, err := os.ReadFile(pidfile)
+		if err != nil {
+			return err
+		}
+
+		pid, err := strconv.Atoi(string(data))
+		if err != nil {
+			return err
+		}
+
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			qwm(0, "Not running")
+			return nil
+		}
+
+		if err := process.Signal(syscall.Signal(0)); err != nil {
+			qwm(0, "Not running")
+			if err := os.Remove(pidfile); err != nil {
+				return err
+			}
+			return nil
+		}
+
+		qwm(0, "Running with PID: "+strconv.Itoa(pid))
 	}
 
 	return nil
