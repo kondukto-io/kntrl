@@ -21,7 +21,9 @@ func initTracerCommand() *cobra.Command {
 	tracerCMD.Flags().Bool("allow-local-ranges", true, "allows access to local IP ranges")
 	tracerCMD.Flags().Bool("allow-github-meta", false, "allows access to GitHub meta IP ranges (https://api.github.com/meta)")
 	tracerCMD.Flags().String("allowed-hosts", "", "enter allowed hostnames (example.com, .github.com)")
+	tracerCMD.MarkFlagRequired("allowed-hosts")
 	tracerCMD.Flags().String("allowed-ips", "", "enter allowed IP addresses")
+	tracerCMD.MarkFlagRequired("allowed-ips")
 	tracerCMD.Flags().StringP("output-file-name", "o", "/tmp/kntrl.out", "output file name")
 
 	return tracerCMD
