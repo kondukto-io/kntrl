@@ -5,110 +5,126 @@
 It can work as a single binary (`kntrl`) or with a docker runner (`docker.io/kondukto/kntrl:0.1.2`).
 
 ## Installation
-### Linux 
-`kntrl` is available as downloadable binaries from the releases page. Download the pre-compiled binary from the `releases` page and copy to the desired location. 
 
+### Linux
+
+`kntrl` is available as downloadable binaries from the releases page. Download the pre-compiled binary from the `releases` page and copy to the desired location.
 
 ### Container Images
+
 We provide ready to use Docker container images. To pull the latest image:
+
 ```
 docker pull kondukto/kntrl:latest
 ```
 
 To pull a specific version:
+
 ```
-docker pull kondukto/kntrl:0.1.2
+docker pull kondukto/kntrl:0.1.4
 ```
 
 ## Using kntrl
 
-You can start using kntrl agent by simply running the following command:
+You can start using kntrl agent by simply running the following command, if you pass `--daemonize` flag the process will run in the background:
 
 ```yaml
-- name: kntrl agent
-  run: sudo ./kntrl run --mode=monitor --allowed-hosts=download.kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allowed-ips=10.0.2.3  
+- name: start kntrl agent
+  run: sudo ./kntrl start --mode=monitor --allowed-hosts=download.kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allowed-ips=10.0.2.3  --daemonize
+```
+
+to stop `kntrl` and print reports:
+
+```yaml
+- name: stop kntrl agent
+  run: sudo ./kntrl stop
 ```
 
 OR with the docker:
 
 ```yaml
 - name: kntrl agent
-  run: sudo docker run --privileged \
+  run: sudo docker start --privileged \
     --pid=host \
     --network=host \
     --cgroupns=host \
     --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
     --volume /tmp:/tmp \
-    --rm docker.io/kondukto/kntrl:0.1.2 run --mode=trace --allowed-hosts=kondukto.io,download.kondukto.io 
+    --rm docker.io/kondukto/kntrl:0.1.2 run --mode=trace --allowed-hosts=kondukto.io,download.kondukto.io
 ```
 
 This action will deploy kntrl into any GitHub Actions build.
 
 ## Usage
+
 The `kntrl` agent is self explanatory and it comes with a help command. Simply run `--help` flag after each command/subcommand.
 
 ```
  ./kntrl --help
-Runtime security tool to control and monitor egress/ingress traffic in CI/CD runners
-
 Usage:
-  tracer [command]
+  kntrl [command]
 
 Available Commands:
   completion  Generate the autocompletion script for the specified shell
   help        Help about any command
-  run         Starts the TCP/UDP tracer
+  start       Start kntrl
+  status      Print kntrl daemon status
+  stop        Stop kntrl daemon
 
 Flags:
-  -h, --help      help for tracer
+  -h, --help      help for kntrl
   -v, --verbose   more logs
+      --version   version for kntrl
 
-Use "tracer [command] --help" for more information about a command.
+Use "kntrl [command] --help" for more information about a command.
+Runtime security tool to control and monitor egress/ingress traffic in CI/CD runners
 ```
 
 The agent supports the following parameters:
 
-| Name                     | Default               | Description                                                                                                                                                                                                                                                                                                                                                               |
-| ------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mode`                   |   monitor                    | kntrl for detected behaviours (monitor or prevent/trace)                                                                                                                                                                                                                                                                                                                  |
-| `allowed-hosts`                  |                       | allowed host list. (example.com, .github.com)                                                                                                                                                                                                                                                                                                                                                         |
-| `allowed-ips`                  |                       | allowed IP list. (192.168.0.100, 1.1.1.1)                                                                                                                                                                                                                                                                                                                                                         |
-| `allow-local-ranges`                  |  true              | allow access to local IP ranges                                                                                                                                                                                                                                                                                                                               |
-| `allow-github-meta`                  |  false              | allow access to GitHub meta IP ranges (https://api.github.com/meta)                                                                                                                                                                                                                                                                                                                               |
-| `output-file`                  | `/tmp/kntrl.out`                       | report file |                                                                                                                                                                                                                                     |
+| Name                 | Default          | Description                                                         |
+| -------------------- | ---------------- | ------------------------------------------------------------------- | --- |
+| `mode`               | monitor          | kntrl for detected behaviours (monitor or prevent/trace)            |
+| `allowed-hosts`      |                  | allowed host list. (example.com, .github.com)                       |
+| `allowed-ips`        |                  | allowed IP list. (192.168.0.100, 1.1.1.1)                           |
+| `allow-local-ranges` | true             | allow access to local IP ranges                                     |
+| `allow-github-meta`  | false            | allow access to GitHub meta IP ranges (https://api.github.com/meta) |
+| `output-file`        | `/tmp/kntrl.out` | report file                                                         |     |
 
 ### Running kntrl on monitoring mode
 
 ```yaml
 - name: kntrl agent
-  run: sudo docker run --privileged \
+  run: sudo docker start --privileged \
   --pid=host \
   --network=host \
   --cgroupns=host \
   --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
   --volume /tmp:/tmp \
   --rm docker.io/kondukto/kntrl:0.1.2 \
-  --mode=monitor 
+  --mode=monitor
 ```
 
 ### Running kntrl on prevent mode
 
 ```yaml
 - name: kntrl agent
-  run: sudo docker run --privileged \
+  run: sudo docker start --privileged \
   --pid=host \
   --network=host \
   --cgroupns=host \
   --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
   --volume /tmp:/tmp \
   --rm docker.io/kondukto/kntrl:0.1.2 \
-  --mode=trace --allowed-hosts=download.kondukto.io, .github.com  
+  --mode=trace --allowed-hosts=download.kondukto.io, .github.com
 ```
 
 ## Open Policy Agent (OPA) Rules
+
 `kntrl` supports an OPA-based policy engine to determine whether the event should be blocked or not. All the policy rules are stored under the bundle/kntrl/ directory.
 
 An example rego rule:
+
 ```
 package kntrl.network["is_local_ip_addr"]
 
@@ -127,6 +143,7 @@ policy if {
 Each event will be logged in the output file. The default report file location is `/tmp/kntrl.out`.
 
 Here is an example report:
+
 ```
 {
   "pid": 2806,
@@ -163,7 +180,7 @@ Here is an example report:
 }
 ```
 
-or 
+or
 
 ```
 Pid  | Comm    | Proto | Domain                          | Destination Addr   | Policy
@@ -182,7 +199,9 @@ Contributions to kntrl are welcome.
 Feel free to join our slack channel [https://kntrl.slack.com](https://kntrl.slack.com)
 
 ## License
+
 Except for the eBPF code, all components are distributed under the [Apache License (version 2.0)](./LICENSE.md).
 
 ## More about Kondukto
+
 `kntrl` is an open source project maintained by [Kondukto](https://kondukto.io).
