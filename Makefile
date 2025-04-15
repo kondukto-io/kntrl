@@ -1,4 +1,4 @@
-CLANG ?= clang
+CLANG ?= clang-19
 CFLAGS ?= -O2 -g -Wall -Werror 
 GOARCH ?= amd64
 

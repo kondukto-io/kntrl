@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/kondukto-io/kntrl/pkg/reporter"
 
 	"github.com/spf13/cobra"
 )
@@ -35,8 +38,8 @@ func initStopCommand() *cobra.Command {
 				qwe(127, err, "failed to remove pidfile")
 			}
 
-			qwm(0, "Process stopped")
-
+			fmt.Printf("Process id [%s] stopped", string(data))
+			reporter.LoadAndPrint()
 		},
 	}
 
