@@ -26,13 +26,12 @@ func initTracerCommand() *cobra.Command {
 			}
 
 			if err := tracer.Run(*cmd); err != nil {
-				qwe(exitCodeError, err, "failed to run tracer")
+				qwe(exitCodeError, err, "failed to run kntrl")
 			}
 		},
 	}
 
 	tracerCMD.Flags().String("mode", "monitor", "trace || monitor")
-	tracerCMD.Flags().String("hosts", "", "enter ip or hostname (192.168.0.100, example.com, .github.com)")
 	tracerCMD.Flags().Bool("allow-local-ranges", true, "allows access to local IP ranges")
 	tracerCMD.Flags().Bool("allow-github-meta", false, "allows access to GitHub meta IP ranges (https://api.github.com/meta)")
 	tracerCMD.Flags().Bool("daemonize", false, "daemonize process")
