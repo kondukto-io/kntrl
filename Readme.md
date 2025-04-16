@@ -82,6 +82,7 @@ Runtime security tool to control and monitor egress/ingress traffic in CI/CD run
 
 The agent supports the following parameters:
 
+```
 | Name                 | Default          | Description                                                         |
 | -------------------- | ---------------- | ------------------------------------------------------------------- | --- |
 | `mode`               | monitor          | kntrl for detected behaviours (monitor or prevent/trace)            |
@@ -90,6 +91,7 @@ The agent supports the following parameters:
 | `allow-local-ranges` | true             | allow access to local IP ranges                                     |
 | `allow-github-meta`  | false            | allow access to GitHub meta IP ranges (https://api.github.com/meta) |
 | `output-file`        | `/tmp/kntrl.out` | report file                                                         |     |
+```
 
 ### Running kntrl on monitoring mode
 
