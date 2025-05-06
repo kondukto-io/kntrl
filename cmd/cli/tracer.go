@@ -12,6 +12,8 @@ import (
 
 const pidfile = "/var/run/kntrl.pid"
 
+var daemon = false
+
 func initTracerCommand() *cobra.Command {
 	tracerCMD := &cobra.Command{
 		Use:   "start",
@@ -19,6 +21,7 @@ func initTracerCommand() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			daemonMode, _ := cmd.Flags().GetBool("daemonize")
 			if daemonMode {
+				daemon = true
 				if err := daemonize(os.Args[1:]); err != nil {
 					qwe(exitCodeError, err, "failed to daemonize")
 				}
