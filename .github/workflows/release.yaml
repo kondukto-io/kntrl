@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Install Dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential git cmake zlib1g-dev libevent-dev libelf-dev llvm clang libc6-dev-i386
+        run: sudo apt-get update && sudo apt-get install -y build-essential git cmake zlib1g-dev libevent-dev libelf-dev llvm clang libc6-dev-i386 clang-19 libclang-common-19-dev libclang-19-dev
 
       - name: Checkout Code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
