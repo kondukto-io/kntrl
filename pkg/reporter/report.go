@@ -1,10 +1,12 @@
 package reporter
 
 import (
+	"bufio"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -15,6 +17,8 @@ import (
 	"github.com/kondukto-io/kntrl/internal/core/domain"
 	"github.com/kondukto-io/kntrl/pkg/logger"
 )
+
+const defaultFile = "/tmp/kntrl.out"
 
 // Reporter is a reporter for events
 type Reporter struct {
@@ -28,7 +32,7 @@ type Reporter struct {
 // NewReporter returns a new reporter
 func NewReporter(outputFileName string) *Reporter {
 	if outputFileName == "" {
-		outputFileName = "/tmp/kntrl.out"
+		outputFileName = defaultFile
 		logger.Log.Debugf("using the default output file: %s", outputFileName)
 	}
 
@@ -46,6 +50,40 @@ func NewReporter(outputFileName string) *Reporter {
 	report.file = file
 
 	return report
+}
+
+func LoadAndPrint() error {
+	f, err := os.OpenFile(defaultFile, os.O_RDONLY, os.ModePerm)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	r := Reporter{
+		file:           f,
+		outputFileName: defaultFile,
+	}
+
+	rd := bufio.NewReader(f)
+	for {
+		line, err := rd.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+		event := domain.ReportEvent{}
+		err = json.Unmarshal([]byte(line), &event)
+		if err != nil {
+			return err
+		}
+		r.events = append(r.events, event)
+	}
+
+	r.PrintReportTable()
+	return nil
 }
 
 // WriteEvent adds an event to the report file

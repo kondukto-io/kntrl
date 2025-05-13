@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/kondukto-io/kntrl/pkg/logger"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -47,6 +48,8 @@ func Execute(args []string) {
 	rootCmd.SetArgs(args)
 
 	rootCmd.AddCommand(initTracerCommand())
+	rootCmd.AddCommand(initStatusCommand())
+	rootCmd.AddCommand(initStopCommand())
 
 	if err := rootCmd.Execute(); err != nil {
 		qwe(exitCodeError, err, "failed to execute root command")
