@@ -1,0 +1,8 @@
+include:
+  - project: 'invicti-security/platform-engineering/devsecops'
+    ref: main
+    file: /ci/appsec-ci.gitlab-ci.yaml
+
+stages:
+  - appsec-test
+  - appsec-report
