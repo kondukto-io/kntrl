@@ -2,7 +2,6 @@ package utils
 
 import (
 	"encoding/binary"
-	"fmt"
 	"net"
 	"os/user"
 	"regexp"
@@ -55,17 +54,14 @@ func GetProtocol(p uint8) string {
 	return "-"
 }
 
-// trim NULL bytes (in the event.Comm)
+// TrimNullBytes extracts the C-string from a fixed-size byte array by slicing to the first null byte.
 func TrimNullBytes(p [16]uint8) string {
-	var comm string
-	for _, v := range p {
+	for i, v := range p {
 		if v == 0 {
-			continue
+			return string(p[:i])
 		}
-		comm = fmt.Sprintf("%s%s", comm, string(v))
 	}
-
-	return comm
+	return string(p[:])
 }
 
 // lookup IP address and trim suffix (".")

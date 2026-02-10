@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"github.com/pterm/pterm"
 
@@ -22,6 +22,7 @@ const defaultFile = "/tmp/kntrl.out"
 
 // Reporter is a reporter for events
 type Reporter struct {
+	mu             sync.Mutex
 	events         []domain.ReportEvent
 	eventsHashMap  map[string]bool
 	processEvents  []domain.ProcessReportEvent
@@ -91,78 +92,92 @@ func LoadAndPrint() error {
 
 // WriteEvent adds an event to the report file
 func (r *Reporter) WriteEvent(event domain.ReportEvent) {
-	var address = event.DestinationAddress + ":" + fmt.Sprint(event.DestinationPort)
-	var hash = hash(address)
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	if _, ok := r.eventsHashMap[hash]; ok {
+	var address = event.DestinationAddress + ":" + fmt.Sprint(event.DestinationPort)
+	var h = hash(address)
+
+	if _, ok := r.eventsHashMap[h]; ok {
 		logger.Log.Debugf("event with address [%s] already exists", address)
 		return
 	}
 
 	r.events = append(r.events, event)
-	r.eventsHashMap[hash] = true
+	r.eventsHashMap[h] = true
 
 	eventData, err := json.Marshal(event)
 	if err != nil {
-		log.Fatalf("failed to marshal: %v", err)
+		logger.Log.Errorf("failed to marshal event: %v", err)
+		return
 	}
 
-	//println(string(eventData)) //
-	_, err = r.file.WriteString(string(eventData) + "\n")
-	if err != nil {
-		log.Fatalf("failed to write an event to file: %s %v", r.file.Name(), err)
+	if _, err = r.file.WriteString(string(eventData) + "\n"); err != nil {
+		logger.Log.Errorf("failed to write event to file: %s %v", r.file.Name(), err)
 	}
 }
 
 // WriteFileEvent adds a file access event to the report
 func (r *Reporter) WriteFileEvent(event domain.FileReportEvent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	r.fileEvents = append(r.fileEvents, event)
 
 	eventData, err := json.Marshal(event)
 	if err != nil {
-		log.Fatalf("failed to marshal file event: %v", err)
+		logger.Log.Errorf("failed to marshal file event: %v", err)
+		return
 	}
 
-	_, err = r.file.WriteString(string(eventData) + "\n")
-	if err != nil {
-		log.Fatalf("failed to write file event to file: %s %v", r.file.Name(), err)
+	if _, err = r.file.WriteString(string(eventData) + "\n"); err != nil {
+		logger.Log.Errorf("failed to write file event to file: %s %v", r.file.Name(), err)
 	}
 }
 
 // WriteDNSEvent adds a DNS event to the report
 func (r *Reporter) WriteDNSEvent(event domain.DNSReportEvent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	r.dnsEvents = append(r.dnsEvents, event)
 
 	eventData, err := json.Marshal(event)
 	if err != nil {
-		log.Fatalf("failed to marshal dns event: %v", err)
+		logger.Log.Errorf("failed to marshal dns event: %v", err)
+		return
 	}
 
-	_, err = r.file.WriteString(string(eventData) + "\n")
-	if err != nil {
-		log.Fatalf("failed to write dns event to file: %s %v", r.file.Name(), err)
+	if _, err = r.file.WriteString(string(eventData) + "\n"); err != nil {
+		logger.Log.Errorf("failed to write dns event to file: %s %v", r.file.Name(), err)
 	}
 }
 
 // WriteProcessEvent adds a process event to the report
 func (r *Reporter) WriteProcessEvent(event domain.ProcessReportEvent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	r.processEvents = append(r.processEvents, event)
 
 	eventData, err := json.Marshal(event)
 	if err != nil {
-		log.Fatalf("failed to marshal process event: %v", err)
+		logger.Log.Errorf("failed to marshal process event: %v", err)
+		return
 	}
 
-	_, err = r.file.WriteString(string(eventData) + "\n")
-	if err != nil {
-		log.Fatalf("failed to write process event to file: %s %v", r.file.Name(), err)
+	if _, err = r.file.WriteString(string(eventData) + "\n"); err != nil {
+		logger.Log.Errorf("failed to write process event to file: %s %v", r.file.Name(), err)
 	}
 }
 
 // Close closes the report file
 func (r *Reporter) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if err := r.file.Close(); err != nil {
-		log.Fatalf("failed to close file: %v", err)
+		logger.Log.Errorf("failed to close report file: %v", err)
 	}
 }
 
@@ -187,6 +202,9 @@ func (r *Reporter) openReportFile() (*os.File, error) {
 }
 
 func (r *Reporter) PrintReportTable() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	fmt.Print("\n\n")
 	data := pterm.TableData{
 		{"Pid", "Comm", "Proto", "Domain", "Destination Addr", "Policy"},
@@ -207,6 +225,9 @@ func (r *Reporter) PrintReportTable() {
 }
 
 func (r *Reporter) PrintFileTable() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if len(r.fileEvents) == 0 {
 		return
 	}
@@ -230,6 +251,9 @@ func (r *Reporter) PrintFileTable() {
 }
 
 func (r *Reporter) PrintDNSTable() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if len(r.dnsEvents) == 0 {
 		return
 	}
@@ -253,6 +277,9 @@ func (r *Reporter) PrintDNSTable() {
 }
 
 func (r *Reporter) PrintProcessTable() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if len(r.processEvents) == 0 {
 		return
 	}

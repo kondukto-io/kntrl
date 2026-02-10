@@ -2,7 +2,6 @@ package policy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	files "io/fs"
 	"os"
@@ -35,11 +34,10 @@ func WithExternalRego(paths []string) Option {
 	}
 }
 
-// Policy struct to stores rego function
-// as we add more queries additional (custom)
-// rules other regoArgs may be required in the future
+// Policy struct stores the pre-compiled OPA query for efficient repeated evaluation.
 type Policy struct {
 	regoArgs []func(r *rego.Rego)
+	prepared *rego.PreparedEvalQuery
 }
 
 // New creates a new Rego policy engine.
@@ -95,20 +93,37 @@ func New(fs files.FS, data []byte, opts ...Option) (*Policy, error) {
 	}, nil
 }
 
-// AddQuery is the query that will be executed
-// in the main.rego
+// AddQuery sets the query and pre-compiles the policy for efficient evaluation.
 func (p *Policy) AddQuery(query string) {
 	p.regoArgs = append(p.regoArgs, rego.Query(query))
+
+	// Pre-compile the query once for reuse across all evaluations
+	ctx := context.Background()
+	prepared, err := rego.New(p.regoArgs...).PrepareForEval(ctx)
+	if err != nil {
+		// Store nil; Eval will fall back to per-call compilation
+		p.prepared = nil
+		return
+	}
+	p.prepared = &prepared
 }
 
-// Eval evaluates the policy with the given input
+// Eval evaluates the policy with the given input.
 func (p *Policy) Eval(ctx context.Context, input map[string]any) (bool, error) {
-	query, err := rego.New(p.regoArgs...).PrepareForEval(ctx)
-	if err != nil {
-		return false, fmt.Errorf("failed to prepare rego query: %w", err)
+	var result rego.ResultSet
+	var err error
+
+	if p.prepared != nil {
+		result, err = p.prepared.Eval(ctx, rego.EvalInput(input))
+	} else {
+		// Fallback: compile on demand (should not happen in normal flow)
+		query, prepErr := rego.New(p.regoArgs...).PrepareForEval(ctx)
+		if prepErr != nil {
+			return false, fmt.Errorf("failed to prepare rego query: %w", prepErr)
+		}
+		result, err = query.Eval(ctx, rego.EvalInput(input))
 	}
 
-	result, err := query.Eval(ctx, rego.EvalInput(input))
 	if err != nil {
 		return false, fmt.Errorf("failed to eval rego query: %w", err)
 	}
@@ -125,15 +140,25 @@ func (p *Policy) Eval(ctx context.Context, input map[string]any) (bool, error) {
 	return val, nil
 }
 
+// EvalEvent evaluates the policy against a ReportEvent by building the input map directly.
 func (p *Policy) EvalEvent(ctx context.Context, event domain.ReportEvent) (bool, error) {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return false, err
+	input := map[string]any{
+		"pid":       event.ProcessID,
+		"task_name": event.TaskName,
+		"proto":     event.Protocol,
+		"daddr":     event.DestinationAddress,
+		"dport":     event.DestinationPort,
+		"domains":   event.Domains,
+		"policy":    event.Policy,
 	}
-	var outmap map[string]any
-	json.Unmarshal(data, &outmap)
+	if event.SNI != "" {
+		input["sni"] = event.SNI
+	}
+	if len(event.Ancestors) > 0 {
+		input["ancestors"] = event.Ancestors
+	}
 
-	return p.Eval(ctx, outmap)
+	return p.Eval(ctx, input)
 }
 
 func unmarshal(data []byte) (dataJson map[string]any, err error) {

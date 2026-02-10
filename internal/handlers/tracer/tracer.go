@@ -152,17 +152,19 @@ func Run(cmd cobra.Command) error {
 
 	defer ebpfClient.Clean()
 
+	modeMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapMode]
+	if modeMap == nil {
+		return fmt.Errorf("eBPF map %q not found", domain.EBPFCollectionMapMode)
+	}
 	switch tracerMode {
 	case domain.TracerModeTrace:
-		modeMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapMode]
 		if err := modeMap.Put(uint32(0), uint32(domain.TracerModeIndexTrace)); err != nil {
-			logger.Log.Fatalf("failed to set mode: %v", err)
+			return fmt.Errorf("failed to set mode: %w", err)
 		}
 
 	case domain.TracerModeMonitor:
-		modeMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapMode]
 		if err := modeMap.Put(uint32(0), uint32(domain.TracerModeIndexMonitor)); err != nil {
-			logger.Log.Fatalf("failed to set mode: %v", err)
+			return fmt.Errorf("failed to set mode: %w", err)
 		}
 
 	default:
@@ -170,25 +172,29 @@ func Run(cmd cobra.Command) error {
 	}
 
 	allowedIPMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedIP]
+	if allowedIPMap == nil {
+		return fmt.Errorf("eBPF map %q not found", domain.EBPFCollectionMapAllowedIP)
+	}
 	err = updateAllowedIPMaps(allowedIPMap, cmddata)
 	if err != nil {
-		logger.Log.Fatalf("failed to update allow ip (map): %v", err)
+		return fmt.Errorf("failed to update allow ip map: %w", err)
 	}
 
 	allowedHostMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedHost]
+	if allowedHostMap == nil {
+		return fmt.Errorf("eBPF map %q not found", domain.EBPFCollectionMapAllowedHost)
+	}
 	err = updateAllowedHostMap(allowedHostMap, cmddata)
 	if err != nil {
-		logger.Log.Fatalf("failed to update allow host (map): %v", err)
+		return fmt.Errorf("failed to update allow host map: %w", err)
 	}
 
 	// Create ring buffer reader for IPv4 events
 	ipv4EventMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapIPV4Events]
 	ipV4Events, err := ringbuf.NewReader(ipv4EventMap)
 	if err != nil {
-		logger.Log.Fatalf("failed to create ringbuf reader for ipv4 events: %v", err)
+		return fmt.Errorf("failed to create ringbuf reader for ipv4 events: %w", err)
 	}
-
-	defer ipV4Events.Close()
 
 	// IPv6 map population and ring buffer
 	allowedIPv6Map := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedIPv6]
@@ -204,8 +210,6 @@ func Run(cmd cobra.Command) error {
 		ipv6Events, err = ringbuf.NewReader(ipv6EventMap)
 		if err != nil {
 			logger.Log.Warnf("failed to create ringbuf reader for ipv6 events: %v", err)
-		} else {
-			defer ipv6Events.Close()
 		}
 	}
 
@@ -229,8 +233,6 @@ func Run(cmd cobra.Command) error {
 			processEvents, err = ringbuf.NewReader(processEventMap)
 			if err != nil {
 				logger.Log.Warnf("failed to create ringbuf reader for process events: %v", err)
-			} else {
-				defer processEvents.Close()
 			}
 		}
 	}
@@ -260,8 +262,6 @@ func Run(cmd cobra.Command) error {
 			fileEvents, err = ringbuf.NewReader(fileEventMap)
 			if err != nil {
 				logger.Log.Warnf("failed to create ringbuf reader for file events: %v", err)
-			} else {
-				defer fileEvents.Close()
 			}
 		}
 	}
@@ -273,8 +273,6 @@ func Run(cmd cobra.Command) error {
 		dnsEvents, err = ringbuf.NewReader(dnsEventMap)
 		if err != nil {
 			logger.Log.Warnf("failed to create ringbuf reader for dns events: %v", err)
-		} else {
-			defer dnsEvents.Close()
 		}
 	}
 
@@ -368,7 +366,7 @@ func Run(cmd cobra.Command) error {
 	stopChan := make(chan os.Signal, 1)
 	sighupChan := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
-	signal.Notify(stopChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL, syscall.SIGQUIT)
+	signal.Notify(stopChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	signal.Notify(sighupChan, syscall.SIGHUP)
 
 	// SIGHUP handler: reload config and policy
@@ -600,7 +598,7 @@ func Run(cmd cobra.Command) error {
 				}
 
 				domainAddress := utils.BytesToIPv6(event.Daddr)
-				domainNames, err := utils.LookupAndTrim(domainAddress)
+				domainNames, err := utils.LookupAndTrimCached(domainAddress)
 				if err != nil {
 					logger.Log.Debugf("failed to lookup ipv6 domain: [%s] %v", domainAddress.String(), err)
 					domainNames = append(domainNames, ".")
@@ -671,7 +669,7 @@ func Run(cmd cobra.Command) error {
 		}
 
 		domainAddress := utils.IntToIP(event.Daddr)
-		domainNames, err := utils.LookupAndTrim(domainAddress)
+		domainNames, err := utils.LookupAndTrimCached(domainAddress)
 		if err != nil {
 			logger.Log.Debugf("failed to lookup domain: [%s] %v", domainAddress.String(), err)
 			domainNames = append(domainNames, ".")
@@ -701,16 +699,16 @@ func Run(cmd cobra.Command) error {
 		if tracerMode != domain.TracerModeMonitor {
 			result, err := policyPtr.Load().EvalEvent(context.Background(), reportEvent)
 			if err != nil {
-				logger.Log.Debugf("policy eval failed: %v", err)
-				return err
+				logger.Log.Warnf("policy eval failed (skipping): %v", err)
+				continue
 			}
 			if result {
 				policyStatus = domain.EventPolicyStatusPass
 				if err := allowedIPMap.Put(event.Daddr, uint32(1)); err != nil {
-					logger.Log.Fatalf("failed to update allow list (map): %v", err)
-					return err
+					logger.Log.Warnf("failed to update allow list (map): %v", err)
+				} else {
+					logger.Log.Infof("ip [%d] added into allowed list", event.Daddr)
 				}
-				logger.Log.Infof("ip [%d] added into allowed list", event.Daddr)
 
 			} else {
 				policyStatus = domain.EventPolicyStatusBlock
@@ -779,12 +777,10 @@ func gatherCLIFlags(cmd *cobra.Command) config.CLIFlags {
 func updateAllowedIPMaps(allowedIPMap *ebpf.Map, arg *domain.Data) error {
 	for _, ipstr := range arg.AllowedIPs {
 		ip := ipstr.To4()
-		var ipUint32 uint32
-		if len(ip) > 16 {
-			ipUint32 = binary.LittleEndian.Uint32(ip[12:16])
-		} else {
-			ipUint32 = binary.LittleEndian.Uint32(ip)
+		if ip == nil || len(ip) < 4 {
+			continue
 		}
+		ipUint32 := binary.LittleEndian.Uint32(ip[:4])
 		if err := allowedIPMap.Put(ipUint32, uint32(1)); err != nil {
 			return err
 		}
