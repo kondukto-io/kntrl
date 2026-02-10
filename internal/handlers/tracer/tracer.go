@@ -31,6 +31,7 @@ import (
 	"github.com/kondukto-io/kntrl/pkg/policy"
 	"github.com/kondukto-io/kntrl/pkg/reporter"
 	"github.com/kondukto-io/kntrl/pkg/utils"
+	"github.com/kondukto-io/kntrl/pkg/webhook"
 )
 
 var (
@@ -81,6 +82,7 @@ func Run(cmd cobra.Command) error {
 	var dataObj []byte
 	var cmddata *domain.Data
 	var externalRegoFiles []string
+	var webhookConfigs []config.WebhookConfig
 
 	if rulesFile != "" || rulesDir != "" {
 		// New config system: load from YAML + directory + CLI flags
@@ -102,6 +104,7 @@ func Run(cmd cobra.Command) error {
 		dataObj = dataBytes
 		cmddata = data
 		externalRegoFiles = regoFiles
+		webhookConfigs = policyCfg.Webhooks
 	} else {
 		// Legacy: CLI flags only
 		data, err := parseFlags(&cmd)
@@ -123,6 +126,22 @@ func Run(cmd cobra.Command) error {
 	}
 
 	bundlePolicy.AddQuery("data.kntrl.policy")
+
+	// Webhook client setup
+	var webhookClient *webhook.Client
+	if len(webhookConfigs) > 0 {
+		var whConfigs []webhook.Config
+		for _, wh := range webhookConfigs {
+			whConfigs = append(whConfigs, webhook.Config{
+				URL:     wh.URL,
+				Headers: wh.Headers,
+				Events:  wh.Events,
+			})
+		}
+		webhookClient = webhook.New(whConfigs)
+		webhookClient.Start(context.Background())
+		logger.Log.Infof("webhook alerting enabled with %d endpoint(s)", len(whConfigs))
+	}
 
 	var ebpfClient = ebpfman.New()
 	if err := ebpfClient.Load(prog); err != nil {
@@ -623,6 +642,15 @@ func Run(cmd cobra.Command) error {
 
 		// Report
 		report.WriteEvent(reportEvent)
+
+		// Webhook alerting
+		if webhookClient != nil {
+			webhookClient.Send(webhook.Event{
+				Type:      policyStatus,
+				Timestamp: int64(event.TsUs),
+				Data:      reportEvent,
+			})
+		}
 
 		logger.Log.Infof("[%d]%s -> %s:%d (%s) [%s]| %s",
 			event.Pid,

@@ -2,9 +2,17 @@ package config
 
 // PolicyConfig is the top-level YAML configuration structure.
 type PolicyConfig struct {
-	Version string      `yaml:"version"`
-	Mode    string      `yaml:"mode"`
-	Rules   RulesConfig `yaml:"rules"`
+	Version  string          `yaml:"version"`
+	Mode     string          `yaml:"mode"`
+	Rules    RulesConfig     `yaml:"rules"`
+	Webhooks []WebhookConfig `yaml:"webhooks"`
+}
+
+// WebhookConfig represents a webhook alerting destination.
+type WebhookConfig struct {
+	URL     string            `yaml:"url"`
+	Headers map[string]string `yaml:"headers"`
+	Events  []string          `yaml:"events"` // "block", "all"
 }
 
 // RulesConfig contains all rule categories.

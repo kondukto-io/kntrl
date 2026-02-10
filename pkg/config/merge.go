@@ -49,6 +49,9 @@ func Merge(base, override *PolicyConfig) *PolicyConfig {
 		override.Rules.DNS.AllowedServers...,
 	))
 
+	// Merge webhooks (append)
+	result.Webhooks = append(result.Webhooks, override.Webhooks...)
+
 	return &result
 }
 
