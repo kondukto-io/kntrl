@@ -45,6 +45,10 @@ func Merge(base, override *PolicyConfig) *PolicyConfig {
 	if override.Rules.Process.Enabled != nil {
 		result.Rules.Process.Enabled = override.Rules.Process.Enabled
 	}
+	result.Rules.Process.BlockedChains = append(
+		result.Rules.Process.BlockedChains,
+		override.Rules.Process.BlockedChains...,
+	)
 
 	// Merge DNS rules
 	result.Rules.DNS.AllowedServers = dedup(append(

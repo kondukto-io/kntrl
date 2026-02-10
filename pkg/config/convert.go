@@ -119,6 +119,15 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 		processProfiles = append(processProfiles, profile)
 	}
 
+	// Convert blocked process chains
+	var blockedChains []domain.BlockedProcessChain
+	for _, bc := range cfg.Rules.Process.BlockedChains {
+		blockedChains = append(blockedChains, domain.BlockedProcessChain{
+			Process:   bc.Process,
+			Ancestors: bc.Ancestors,
+		})
+	}
+
 	data := &domain.Data{
 		AllowedHosts:       dedup(hosts),
 		AllowedIPs:         ips,
@@ -129,7 +138,8 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 		AllowMetadata:      allowMetadata,
 		AllowedIPv6s:       ipv6s,
 		AllowedDNSServers:  allowedDNSServers,
-		ProcessProfiles:    processProfiles,
+		ProcessProfiles:      processProfiles,
+		BlockedProcessChains: blockedChains,
 	}
 
 	dataBytes, err := json.Marshal(data)

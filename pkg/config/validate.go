@@ -62,5 +62,14 @@ func Validate(cfg *PolicyConfig) error {
 		}
 	}
 
+	for _, chain := range cfg.Rules.Process.BlockedChains {
+		if strings.TrimSpace(chain.Process) == "" {
+			return fmt.Errorf("empty process name in blocked_chains")
+		}
+		if len(chain.Ancestors) == 0 {
+			return fmt.Errorf("blocked_chains entry for %q must have at least one ancestor", chain.Process)
+		}
+	}
+
 	return nil
 }

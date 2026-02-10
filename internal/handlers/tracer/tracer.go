@@ -29,6 +29,7 @@ import (
 	"github.com/kondukto-io/kntrl/pkg/logger"
 	"github.com/kondukto-io/kntrl/pkg/parser"
 	"github.com/kondukto-io/kntrl/pkg/policy"
+	"github.com/kondukto-io/kntrl/pkg/proctree"
 	"github.com/kondukto-io/kntrl/pkg/reporter"
 	"github.com/kondukto-io/kntrl/pkg/utils"
 	"github.com/kondukto-io/kntrl/pkg/webhook"
@@ -432,6 +433,8 @@ func Run(cmd cobra.Command) error {
 		logger.Log.Fatalf("failed to create reporter: %s", report.Err)
 	}
 
+	procTree := proctree.New()
+
 	// Process event goroutine
 	if processEvents != nil {
 		go func() {
@@ -464,6 +467,8 @@ func Run(cmd cobra.Command) error {
 					Filename:    trimNullBytesLong(event.Filename[:]),
 					TimestampUs: event.TsUs,
 				}
+
+				procTree.Update(event.Pid, event.PPid, reportEvent.Comm)
 
 				report.WriteProcessEvent(reportEvent)
 				logger.Log.Infof("[process] %s pid=%d ppid=%d comm=%s file=%s",
@@ -617,6 +622,7 @@ func Run(cmd cobra.Command) error {
 					DestinationPort:    event.Dport,
 					Domains:            domainNames,
 					Policy:             policyStatus,
+					Ancestors:          procTree.GetAncestors(event.Pid, 32),
 				}
 
 				if tracerMode != domain.TracerModeMonitor {
@@ -688,6 +694,7 @@ func Run(cmd cobra.Command) error {
 			DestinationPort:    event.Dport,
 			Domains:            domainNames,
 			Policy:             policyStatus,
+			Ancestors:          procTree.GetAncestors(event.Pid, 32),
 		}
 
 		// Policy logic

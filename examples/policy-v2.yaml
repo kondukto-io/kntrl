@@ -35,6 +35,11 @@ rules:
           - "files.pythonhosted.org"
   process:
     enabled: true
+    blocked_chains:
+      - process: "curl"
+        ancestors: ["npm"]
+      - process: "wget"
+        ancestors: ["pip"]
   dns:
     allowed_servers:
       - "8.8.8.8"

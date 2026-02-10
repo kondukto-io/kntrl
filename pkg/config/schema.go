@@ -36,7 +36,14 @@ type DNSRules struct {
 
 // ProcessRules contains process monitoring policy rules.
 type ProcessRules struct {
-	Enabled *bool `yaml:"enabled"` // default true
+	Enabled       *bool                `yaml:"enabled"` // default true
+	BlockedChains []BlockedChainConfig `yaml:"blocked_chains"`
+}
+
+// BlockedChainConfig defines a process ancestry chain to block.
+type BlockedChainConfig struct {
+	Process   string   `yaml:"process"`
+	Ancestors []string `yaml:"ancestors"`
 }
 
 // NetworkRules contains network-related policy rules.

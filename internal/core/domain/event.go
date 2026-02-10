@@ -35,6 +35,7 @@ type ReportEvent struct {
 	Domains            []string `json:"domains"`
 	Policy             string   `json:"policy"`
 	SNI                string   `json:"sni,omitempty"`
+	Ancestors          []string `json:"ancestors,omitempty"`
 }
 
 const (

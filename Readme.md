@@ -121,6 +121,79 @@ The agent supports the following parameters:
   --mode=trace --allowed-hosts=download.kondukto.io, .github.com
 ```
 
+## YAML Policy Configuration
+
+`kntrl` supports a YAML-based policy configuration file via the `--rules-file` flag. This gives you fine-grained control over network access, process monitoring, DNS servers, file access, and process ancestry chains.
+
+```yaml
+version: "1"
+mode: trace
+rules:
+  network:
+    allowed_hosts:
+      - "github.com"
+      - ".npmjs.org"
+    allowed_ips:
+      - "10.0.0.0/8"
+    allow_local_ranges: true
+    allow_github_meta: true
+    allow_metadata: false
+    allowed_processes:
+      - "curl"
+      - "git"
+    profiles:
+      - process: "npm"
+        allowed_hosts:
+          - "registry.npmjs.org"
+  process:
+    enabled: true
+    blocked_chains:
+      - process: "curl"
+        ancestors: ["npm"]
+      - process: "wget"
+        ancestors: ["pip"]
+  dns:
+    allowed_servers:
+      - "8.8.8.8"
+  file:
+    enabled: false
+    monitored_paths:
+      - "/etc/shadow"
+```
+
+See `examples/policy-v2.yaml` for a full example.
+
+### Process Ancestry Chain Blocking
+
+`kntrl` tracks process fork/exec events to build an in-memory process tree. When a network connection is made, `kntrl` walks the tree to determine the full ancestry chain of the connecting process. This ancestry is then evaluated against `blocked_chains` rules.
+
+Each `blocked_chains` entry specifies a `process` name and a list of `ancestors`. If the process making the network connection matches `process` **and** every name in `ancestors` appears somewhere in its ancestry chain, the connection is **denied**.
+
+This lets you write rules like "block `curl` if it was spawned (directly or indirectly) by `npm`":
+
+```yaml
+rules:
+  process:
+    enabled: true
+    blocked_chains:
+      - process: "curl"
+        ancestors: ["npm"]
+```
+
+With this rule:
+- `npm install` spawning `sh -> curl` to exfiltrate data is **blocked**
+- A user running `curl github.com` directly from a shell is **allowed**
+
+You can require multiple ancestors to be present. For example, blocking `sh` only when both `npm` and `node` are in the ancestry:
+
+```yaml
+blocked_chains:
+  - process: "sh"
+    ancestors: ["npm", "node"]
+```
+
+The ancestry chain (as `ancestors` in the report JSON) is also passed into OPA policy evaluation, so you can write custom Rego rules against `input.ancestors`.
+
 ## Open Policy Agent (OPA) Rules
 
 `kntrl` supports an OPA-based policy engine to determine whether the event should be blocked or not. All the policy rules are stored under the bundle/kntrl/ directory.
@@ -156,18 +229,20 @@ Here is an example report:
   "domains": [
     "lb-140-82-114-22-iad.github.com."
   ],
-  "policy": "pass"
+  "policy": "pass",
+  "ancestors": ["bash"]
 }
 {
-  "pid": 2806,
+  "pid": 3201,
   "task_name": "curl",
   "proto": "tcp",
-  "daddr": "142.251.167.95",
+  "daddr": "evil.example.com",
   "dport": 443,
   "domains": [
-    "ww-in-f95.1e100.net."
+    "evil.example.com."
   ],
-  "policy": "block"
+  "policy": "block",
+  "ancestors": ["sh", "npm", "node", "bash"]
 }
 {
   "pid": 2806,
@@ -181,6 +256,8 @@ Here is an example report:
   "policy": "pass"
 }
 ```
+
+When process ancestry tracking is active, the `ancestors` field contains the chain of parent process names (parent, grandparent, etc.). This field is omitted when the ancestry is empty.
 
 or
 

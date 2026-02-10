@@ -24,8 +24,9 @@ process_allowed if {
 	input.task_name == data.allowed_processes[_]
 }
 
-# Final policy: both network and process must be allowed
+# Final policy: network and process must be allowed, ancestry must not be denied
 policy if {
 	network_allowed
 	process_allowed
+	not ancestry_denied
 }

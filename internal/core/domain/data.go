@@ -29,6 +29,14 @@ type Data struct {
 	AllowedDNSServers []net.IP `json:"allowed_dns_servers,omitempty"`
 	// ProcessProfiles are per-process network access profiles.
 	ProcessProfiles []ProcessProfileData `json:"process_profiles,omitempty"`
+	// BlockedProcessChains are process ancestry chains to deny.
+	BlockedProcessChains []BlockedProcessChain `json:"blocked_process_chains,omitempty"`
+}
+
+// BlockedProcessChain represents a process ancestry chain to deny in OPA.
+type BlockedProcessChain struct {
+	Process   string   `json:"process"`
+	Ancestors []string `json:"ancestors"`
 }
 
 // ProcessProfileData represents a per-process network access profile for OPA.
