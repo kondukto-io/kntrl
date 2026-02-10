@@ -3,7 +3,6 @@
 #include "headers/vmlinux.h"
 #include <asm-generic/errno-base.h>
 #include <stdbool.h>
-#include <string.h>
 
 #include "headers/bpf_helpers.h"
 #include "headers/bpf_core_read.h"
@@ -492,10 +491,8 @@ int inet_sock_set_state(void *ctx) {
 	}
 
 	int oldstate;
-	int newstate;
 
 	oldstate = BPF_CORE_READ(&args, oldstate);
-	newstate = BPF_CORE_READ(&args, newstate);
 
 	u8 daddr[16];
 	__builtin_memcpy(&daddr, &args.daddr, sizeof(daddr));

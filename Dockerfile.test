@@ -7,14 +7,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     clang-16 \
     llvm-16 \
     libelf-dev \
-    linux-headers-generic \
     libc6-dev \
     wget \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install OPA CLI for Rego tests
-RUN wget -q -O /usr/local/bin/opa https://openpolicyagent.org/downloads/v0.68.0/opa_linux_amd64_static \
+RUN ARCH=$(dpkg --print-architecture) && \
+    wget -q -O /usr/local/bin/opa https://openpolicyagent.org/downloads/v0.68.0/opa_linux_${ARCH}_static \
     && chmod +x /usr/local/bin/opa
 
 WORKDIR /src

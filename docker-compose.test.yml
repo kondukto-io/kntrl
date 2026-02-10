@@ -3,6 +3,7 @@ version: "3.8"
 services:
   # Unit tests - no eBPF kernel access needed
   test-unit:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.test
@@ -20,6 +21,7 @@ services:
 
   # Rego/OPA tests
   test-rego:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.test
@@ -29,6 +31,7 @@ services:
 
   # eBPF tests - requires privileged mode and kernel access
   test-ebpf:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.test
@@ -52,6 +55,7 @@ services:
 
   # Integration tests - full end-to-end
   test-integration:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.test
@@ -74,6 +78,7 @@ services:
 
   # All tests combined
   test-all:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.test
