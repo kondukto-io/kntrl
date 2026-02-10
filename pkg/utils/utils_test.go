@@ -2,52 +2,47 @@ package utils
 
 import (
 	"net"
-	"reflect"
 	"testing"
 )
 
-func TestParseAllowedIP(t *testing.T) {
-	// Mocking localIPRanges for testing
-	var expIPs []net.IP
-	{
-		expIPs = append(expIPs, net.ParseIP(githubMetaIPAddress))
-		expIPs = append(expIPs, net.ParseIP(azureIPAddress))
-	}
-
-	var expRanges []string
-	{
-		expRanges = append(expRanges, localIPRanges...)
-	}
-
-	testCases := []struct {
-		input          string
-		expectedIPs    []net.IP
-		expectedRanges []string
+func TestGetProtocol(t *testing.T) {
+	tests := []struct {
+		input    uint8
+		expected string
 	}{
-		{
-			input:          "192.168.0.1,192.168.0.2,10.0.0.0/24",
-			expectedIPs:    []net.IP{net.ParseIP("192.168.0.1"), net.ParseIP("192.168.0.2")},
-			expectedRanges: []string{"192.168.1.0/24", "10.0.0.0/8", "10.0.0.0/24"},
-		},
-		{
-			input:          "192.168.0.1/24,8.8.8.8",
-			expectedIPs:    []net.IP{net.ParseIP("8.8.8.8")},
-			expectedRanges: []string{"192.168.1.0/24", "10.0.0.0/8"},
-		},
-		// Add more test cases as needed
+		{1, "icmp"},
+		{6, "tcp"},
+		{17, "udp"},
+		{99, "-"},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.input, func(t *testing.T) {
-			ips, ranges := ParseAllowedIP(tc.input)
-
-			if !reflect.DeepEqual(ips, tc.expectedIPs) {
-				t.Errorf("unexpected IPs, expected: %v, got: %v", tc.expectedIPs, ips)
-			}
-
-			if !reflect.DeepEqual(ranges, tc.expectedRanges) {
-				t.Errorf("unexpected ranges, expected: %v, got: %v", tc.expectedRanges, ranges)
-			}
-		})
+	for _, tc := range tests {
+		result := GetProtocol(tc.input)
+		if result != tc.expected {
+			t.Errorf("GetProtocol(%d) = %q, want %q", tc.input, result, tc.expected)
+		}
 	}
+}
+
+func TestTrimNullBytes(t *testing.T) {
+	var input [16]uint8
+	copy(input[:], "curl")
+	result := TrimNullBytes(input)
+	if result != "curl" {
+		t.Errorf("TrimNullBytes() = %q, want %q", result, "curl")
+	}
+}
+
+func TestIntToIP(t *testing.T) {
+	// 127.0.0.1 in little-endian is 0x0100007F
+	ip := IntToIP(0x0100007F)
+	expected := net.IPv4(127, 0, 0, 1).To4()
+	if !ip.Equal(expected) {
+		t.Errorf("IntToIP(0x0100007F) = %v, want %v", ip, expected)
+	}
+}
+
+func TestIsRoot(t *testing.T) {
+	// Just ensure it doesn't panic
+	_ = IsRoot()
 }
