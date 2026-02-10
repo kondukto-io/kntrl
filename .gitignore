@@ -4,7 +4,7 @@
 # ignore object files
 internal/**/*.o
 internal/**/*x86.go
-kntrl
+/kntrl
 
 dist/
 \.idea/

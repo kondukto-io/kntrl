@@ -41,6 +41,8 @@ func initTracerCommand() *cobra.Command {
 	tracerCMD.Flags().String("allowed-hosts", "", "enter allowed hostnames (example.com, .github.com)")
 	tracerCMD.Flags().String("allowed-ips", "", "enter allowed IP addresses")
 	tracerCMD.Flags().StringP("output-file-name", "o", "/tmp/kntrl.out", "output file name")
+	tracerCMD.Flags().String("rules-file", "", "path to a YAML rules file")
+	tracerCMD.Flags().String("rules-dir", "", "path to a directory of .yaml and/or .rego rule files")
 
 	return tracerCMD
 }
@@ -59,7 +61,6 @@ func daemonize(args []string) error {
 		filteredArgs = append(filteredArgs, args[i])
 	}
 
-	// TODO: trim args for command injection
 	cmd := exec.Command(os.Args[0], filteredArgs...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil

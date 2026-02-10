@@ -1,0 +1,22 @@
+version: "1"
+mode: trace
+rules:
+  network:
+    allowed_hosts:
+      - "github.com"
+      - ".githubusercontent.com"
+      - ".amazonaws.com"
+      - ".docker.io"
+      - ".docker.com"
+    allowed_ips:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+    allow_local_ranges: true
+    allow_github_meta: true
+    allowed_processes:
+      - "curl"
+      - "git"
+      - "wget"
+      - "docker"
+      - "npm"
+      - "pip"

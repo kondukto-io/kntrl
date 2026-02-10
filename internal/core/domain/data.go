@@ -16,4 +16,8 @@ type Data struct {
 	AllowGithubMeta bool `json:"allow_github_meta"`
 	// Allow local IP addresses.
 	AllowLocalIPRanges bool `json:"allow_local_ip_ranges"`
+	// Allowed process names. If empty, all processes are allowed.
+	AllowedProcesses []string `json:"allowed_processes,omitempty"`
+	// Allowed CIDR ranges.
+	AllowedCIDRs []string `json:"allowed_cidrs,omitempty"`
 }
