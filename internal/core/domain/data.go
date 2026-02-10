@@ -25,4 +25,6 @@ type Data struct {
 	AllowMetadata bool `json:"allow_metadata"`
 	// AllowedIPv6s are allowed IPv6 addresses.
 	AllowedIPv6s []net.IP `json:"allowed_ipv6s,omitempty"`
+	// AllowedDNSServers are the allowed DNS server IPs.
+	AllowedDNSServers []net.IP `json:"allowed_dns_servers,omitempty"`
 }

@@ -46,5 +46,15 @@ func Validate(cfg *PolicyConfig) error {
 		}
 	}
 
+	for _, server := range cfg.Rules.DNS.AllowedServers {
+		server = strings.TrimSpace(server)
+		if server == "" {
+			return fmt.Errorf("empty DNS server in allowed_servers")
+		}
+		if net.ParseIP(server) == nil {
+			return fmt.Errorf("invalid DNS server IP: %q", server)
+		}
+	}
+
 	return nil
 }

@@ -11,6 +11,12 @@ type PolicyConfig struct {
 type RulesConfig struct {
 	Network NetworkRules `yaml:"network"`
 	Process ProcessRules `yaml:"process"`
+	DNS     DNSRules     `yaml:"dns"`
+}
+
+// DNSRules contains DNS monitoring policy rules.
+type DNSRules struct {
+	AllowedServers []string `yaml:"allowed_servers"`
 }
 
 // ProcessRules contains process monitoring policy rules.

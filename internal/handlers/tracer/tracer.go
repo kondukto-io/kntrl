@@ -212,6 +212,33 @@ func Run(cmd cobra.Command) error {
 		}
 	}
 
+	// DNS monitoring setup
+	var dnsEvents *ringbuf.Reader
+	dnsEventMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapDNSEvents]
+	if dnsEventMap != nil {
+		dnsEvents, err = ringbuf.NewReader(dnsEventMap)
+		if err != nil {
+			logger.Log.Warnf("failed to create ringbuf reader for dns events: %v", err)
+		} else {
+			defer dnsEvents.Close()
+		}
+	}
+
+	// Populate allowed DNS servers map
+	allowedDNSServersMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedDNSServers]
+	if allowedDNSServersMap != nil && cmddata.AllowedDNSServers != nil {
+		for _, ip := range cmddata.AllowedDNSServers {
+			ipv4 := ip.To4()
+			if ipv4 == nil {
+				continue
+			}
+			ipUint32 := binary.LittleEndian.Uint32(ipv4)
+			if err := allowedDNSServersMap.Put(ipUint32, uint32(1)); err != nil {
+				logger.Log.Warnf("failed to update allowed DNS server: %v", err)
+			}
+		}
+	}
+
 	// Remove memory lock restrictions for eBPF programs
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return err
@@ -302,6 +329,11 @@ func Run(cmd cobra.Command) error {
 				logger.Log.Warnf("closing process ringbuf reader: %s", err)
 			}
 		}
+		if dnsEvents != nil {
+			if err := dnsEvents.Close(); err != nil {
+				logger.Log.Warnf("closing dns ringbuf reader: %s", err)
+			}
+		}
 	}()
 
 	var outputDir = cmd.Flag("output-file-name").Value.String()
@@ -347,6 +379,41 @@ func Run(cmd cobra.Command) error {
 				report.WriteProcessEvent(reportEvent)
 				logger.Log.Infof("[process] %s pid=%d ppid=%d comm=%s file=%s",
 					eventTypeStr, event.Pid, event.PPid, reportEvent.Comm, reportEvent.Filename)
+			}
+		}()
+	}
+
+	// DNS event goroutine
+	if dnsEvents != nil {
+		go func() {
+			for {
+				record, err := dnsEvents.Read()
+				if err != nil {
+					if errors.Is(err, ringbuf.ErrClosed) {
+						return
+					}
+					logger.Log.Errorf("failed to read dns ringbuf event: %v", err)
+					continue
+				}
+
+				var event domain.DNSEvent
+				if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
+					logger.Log.Debugf("failed to parse dns event: %v", err)
+					continue
+				}
+
+				reportEvent := domain.DNSReportEvent{
+					ProcessID:   event.Pid,
+					DNSServer:   utils.IntToIP(event.DNSServerIP).String(),
+					QueryDomain: trimNullBytesLong(event.Qname[:]),
+					QueryType:   event.Qtype,
+					IsResponse:  event.IsResponse == 1,
+					TimestampUs: event.TsUs,
+				}
+
+				report.WriteDNSEvent(reportEvent)
+				logger.Log.Infof("[dns] pid=%d server=%s domain=%s response=%v",
+					event.Pid, reportEvent.DNSServer, reportEvent.QueryDomain, reportEvent.IsResponse)
 			}
 		}()
 	}
@@ -504,6 +571,7 @@ func Run(cmd cobra.Command) error {
 EXIT:
 	<-done
 	report.PrintReportTable()
+	report.PrintDNSTable()
 	report.PrintProcessTable()
 	report.Close()
 	return nil

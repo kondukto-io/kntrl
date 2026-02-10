@@ -76,6 +76,14 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 		)
 	}
 
+	// Parse allowed DNS servers
+	var allowedDNSServers []net.IP
+	for _, s := range cfg.Rules.DNS.AllowedServers {
+		if ip := net.ParseIP(strings.TrimSpace(s)); ip != nil {
+			allowedDNSServers = append(allowedDNSServers, ip.To4())
+		}
+	}
+
 	data := &domain.Data{
 		AllowedHosts:       dedup(hosts),
 		AllowedIPs:         ips,
@@ -85,6 +93,7 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 		AllowedCIDRs:       cidrs,
 		AllowMetadata:      allowMetadata,
 		AllowedIPv6s:       ipv6s,
+		AllowedDNSServers:  allowedDNSServers,
 	}
 
 	dataBytes, err := json.Marshal(data)

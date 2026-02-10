@@ -25,6 +25,7 @@ type Reporter struct {
 	events         []domain.ReportEvent
 	eventsHashMap  map[string]bool
 	processEvents  []domain.ProcessReportEvent
+	dnsEvents      []domain.DNSReportEvent
 	Err            error
 	outputFileName string
 	file           *os.File
@@ -112,6 +113,21 @@ func (r *Reporter) WriteEvent(event domain.ReportEvent) {
 	}
 }
 
+// WriteDNSEvent adds a DNS event to the report
+func (r *Reporter) WriteDNSEvent(event domain.DNSReportEvent) {
+	r.dnsEvents = append(r.dnsEvents, event)
+
+	eventData, err := json.Marshal(event)
+	if err != nil {
+		log.Fatalf("failed to marshal dns event: %v", err)
+	}
+
+	_, err = r.file.WriteString(string(eventData) + "\n")
+	if err != nil {
+		log.Fatalf("failed to write dns event to file: %s %v", r.file.Name(), err)
+	}
+}
+
 // WriteProcessEvent adds a process event to the report
 func (r *Reporter) WriteProcessEvent(event domain.ProcessReportEvent) {
 	r.processEvents = append(r.processEvents, event)
@@ -168,6 +184,29 @@ func (r *Reporter) PrintReportTable() {
 		res = append(res, v.Domains...)
 		res = append(res, fmt.Sprintf("%s:%d", v.DestinationAddress, v.DestinationPort))
 		res = append(res, v.Policy)
+		data = append(data, res)
+	}
+
+	pterm.DefaultTable.WithHasHeader().WithRowSeparator("-").WithHeaderRowSeparator("-").WithData(data).Render()
+}
+
+func (r *Reporter) PrintDNSTable() {
+	if len(r.dnsEvents) == 0 {
+		return
+	}
+
+	fmt.Print("\n\n")
+	data := pterm.TableData{
+		{"Pid", "DNS Server", "Query Domain", "Type"},
+	}
+
+	for _, v := range r.dnsEvents {
+		res := []string{
+			strconv.FormatUint(uint64(v.ProcessID), 10),
+			v.DNSServer,
+			v.QueryDomain,
+			strconv.FormatUint(uint64(v.QueryType), 10),
+		}
 		data = append(data, res)
 	}
 
