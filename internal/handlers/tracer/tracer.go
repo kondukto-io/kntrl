@@ -416,6 +416,40 @@ func Run(cmd cobra.Command) error {
 		}()
 	}
 
+	// SNI event goroutine
+	var sniEvents *ringbuf.Reader
+	sniEventMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapSNIEvents]
+	if sniEventMap != nil {
+		sniEvents, err = ringbuf.NewReader(sniEventMap)
+		if err != nil {
+			logger.Log.Warnf("failed to create ringbuf reader for sni events: %v", err)
+		} else {
+			defer sniEvents.Close()
+			go func() {
+				for {
+					record, err := sniEvents.Read()
+					if err != nil {
+						if errors.Is(err, ringbuf.ErrClosed) {
+							return
+						}
+						logger.Log.Errorf("failed to read sni ringbuf event: %v", err)
+						continue
+					}
+
+					var event domain.SNIEvent
+					if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
+						logger.Log.Debugf("failed to parse sni event: %v", err)
+						continue
+					}
+
+					sni := trimNullBytesLong(event.SNI[:])
+					logger.Log.Infof("[sni] pid=%d dst=%s:%d sni=%s",
+						event.Pid, utils.IntToIP(event.Daddr), event.Dport, sni)
+				}
+			}()
+		}
+	}
+
 	// DNS event goroutine
 	if dnsEvents != nil {
 		go func() {

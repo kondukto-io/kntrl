@@ -18,6 +18,9 @@ const EBPFCollectionMapIPV6Events = "ipv6_events"
 // EBPFCollectionMapAllowedIPv6 is the allow list for IPv6 addresses
 const EBPFCollectionMapAllowedIPv6 = "allowed_ipv6_map"
 
+// EBPFCollectionMapSNIEvents is the TLS SNI events ring buffer
+const EBPFCollectionMapSNIEvents = "sni_events"
+
 // EBPFCollectionMapDNSEvents is the DNS events ring buffer
 const EBPFCollectionMapDNSEvents = "dns_events"
 

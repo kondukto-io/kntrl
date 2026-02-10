@@ -34,6 +34,7 @@ type ReportEvent struct {
 	DestinationPort    uint16   `json:"dport"`
 	Domains            []string `json:"domains"`
 	Policy             string   `json:"policy"`
+	SNI                string   `json:"sni,omitempty"`
 }
 
 const (
