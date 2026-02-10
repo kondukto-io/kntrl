@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/cilium/ebpf"
@@ -307,13 +309,44 @@ func Run(cmd cobra.Command) error {
 		}
 	}
 
-	sigs := make(chan os.Signal, 1)
-	done := make(chan bool, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL, syscall.SIGQUIT, syscall.SIGHUP)
+	// Atomic policy pointer for lock-free reads and SIGHUP reload
+	var policyPtr atomic.Pointer[policy.Policy]
+	policyPtr.Store(bundlePolicy)
 
-	// Signal handler
+	stopChan := make(chan os.Signal, 1)
+	sighupChan := make(chan os.Signal, 1)
+	done := make(chan bool, 1)
+	signal.Notify(stopChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL, syscall.SIGQUIT)
+	signal.Notify(sighupChan, syscall.SIGHUP)
+
+	// SIGHUP handler: reload config and policy
 	go func() {
-		<-sigs
+		for range sighupChan {
+			logger.Log.Info("SIGHUP: reloading policy...")
+			newPolicy, newData, err := loadConfig(rulesFile, rulesDir, gatherCLIFlags(&cmd), bundleFS, externalRegoFiles)
+			if err != nil {
+				logger.Log.Errorf("SIGHUP reload failed: %v", err)
+				continue
+			}
+			if err := updateAllowedIPMaps(allowedIPMap, newData); err != nil {
+				logger.Log.Errorf("SIGHUP: failed to update IP maps: %v", err)
+			}
+			if err := updateAllowedHostMap(allowedHostMap, newData); err != nil {
+				logger.Log.Errorf("SIGHUP: failed to update host maps: %v", err)
+			}
+			if allowedIPv6Map != nil {
+				if err := updateAllowedIPv6Maps(allowedIPv6Map, newData); err != nil {
+					logger.Log.Errorf("SIGHUP: failed to update IPv6 maps: %v", err)
+				}
+			}
+			policyPtr.Store(newPolicy)
+			logger.Log.Info("SIGHUP: policy reloaded successfully")
+		}
+	}()
+
+	// Shutdown signal handler
+	go func() {
+		<-stopChan
 		done <- true
 
 		if err := ipV4Events.Close(); err != nil {
@@ -463,7 +496,7 @@ func Run(cmd cobra.Command) error {
 				}
 
 				if tracerMode != domain.TracerModeMonitor {
-					result, err := bundlePolicy.EvalEvent(context.Background(), reportEvent)
+					result, err := policyPtr.Load().EvalEvent(context.Background(), reportEvent)
 					if err != nil {
 						logger.Log.Debugf("ipv6 policy eval failed: %v", err)
 						continue
@@ -535,7 +568,7 @@ func Run(cmd cobra.Command) error {
 
 		// Policy logic
 		if tracerMode != domain.TracerModeMonitor {
-			result, err := bundlePolicy.EvalEvent(context.Background(), reportEvent)
+			result, err := policyPtr.Load().EvalEvent(context.Background(), reportEvent)
 			if err != nil {
 				logger.Log.Debugf("policy eval failed: %v", err)
 				return err
@@ -640,6 +673,28 @@ func updateAllowedHostMap(allowedHostMap *ebpf.Map, arg *domain.Data) error {
 		}
 	}
 	return nil
+}
+
+func loadConfig(rulesFile, rulesDir string, cliFlags config.CLIFlags, bundleFS fs.FS, externalRegoFiles []string) (*policy.Policy, *domain.Data, error) {
+	policyCfg, regoFiles, err := config.LoadAll(rulesFile, rulesDir, cliFlags)
+	if err != nil {
+		return nil, nil, fmt.Errorf("config loading error: %w", err)
+	}
+
+	regoFiles = append(regoFiles, externalRegoFiles...)
+
+	dataBytes, data, err := config.ToOPAData(policyCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("config conversion error: %w", err)
+	}
+
+	newPolicy, err := policy.New(bundleFS, dataBytes, policy.WithExternalRego(regoFiles))
+	if err != nil {
+		return nil, nil, fmt.Errorf("policy init error: %w", err)
+	}
+	newPolicy.AddQuery("data.kntrl.policy")
+
+	return newPolicy, data, nil
 }
 
 func getProcessConfig(cmd *cobra.Command) (bool, bool) {
