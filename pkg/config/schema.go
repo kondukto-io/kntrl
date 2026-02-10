@@ -20,6 +20,13 @@ type RulesConfig struct {
 	Network NetworkRules `yaml:"network"`
 	Process ProcessRules `yaml:"process"`
 	DNS     DNSRules     `yaml:"dns"`
+	File    FileRules    `yaml:"file"`
+}
+
+// FileRules contains file access monitoring policy rules.
+type FileRules struct {
+	Enabled        *bool    `yaml:"enabled"`
+	MonitoredPaths []string `yaml:"monitored_paths"`
 }
 
 // DNSRules contains DNS monitoring policy rules.

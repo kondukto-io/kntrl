@@ -49,6 +49,7 @@ var tracePointAttach = map[string][2]string{
 	"inet_sock_set_state": {"sock", "inet_sock_set_state"},
 	"trace_exec":          {"sched", "sched_process_exec"},
 	"trace_fork":          {"sched", "sched_process_fork"},
+	"trace_openat":        {"syscalls", "sys_enter_openat"},
 }
 
 func init() {
@@ -233,6 +234,37 @@ func Run(cmd cobra.Command) error {
 		}
 	}
 
+	// File monitoring setup
+	var fileEvents *ringbuf.Reader
+	fileMonitorEnabled := false
+	if rulesFile != "" || rulesDir != "" {
+		// Check file rules from config (default: disabled)
+		cliFlags := gatherCLIFlags(&cmd)
+		policyCfg, _, _ := config.LoadAll(rulesFile, rulesDir, cliFlags)
+		if policyCfg != nil && policyCfg.Rules.File.Enabled != nil && *policyCfg.Rules.File.Enabled {
+			fileMonitorEnabled = true
+		}
+	}
+
+	if fileMonitorEnabled {
+		fileMonitorMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapFileMonitor]
+		if fileMonitorMap != nil {
+			if err := fileMonitorMap.Put(uint32(0), uint32(1)); err != nil {
+				logger.Log.Warnf("failed to enable file monitor: %v", err)
+			}
+		}
+
+		fileEventMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapFileEvents]
+		if fileEventMap != nil {
+			fileEvents, err = ringbuf.NewReader(fileEventMap)
+			if err != nil {
+				logger.Log.Warnf("failed to create ringbuf reader for file events: %v", err)
+			} else {
+				defer fileEvents.Close()
+			}
+		}
+	}
+
 	// DNS monitoring setup
 	var dnsEvents *ringbuf.Reader
 	dnsEventMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapDNSEvents]
@@ -386,6 +418,11 @@ func Run(cmd cobra.Command) error {
 				logger.Log.Warnf("closing dns ringbuf reader: %s", err)
 			}
 		}
+		if fileEvents != nil {
+			if err := fileEvents.Close(); err != nil {
+				logger.Log.Warnf("closing file ringbuf reader: %s", err)
+			}
+		}
 	}()
 
 	var outputDir = cmd.Flag("output-file-name").Value.String()
@@ -467,6 +504,40 @@ func Run(cmd cobra.Command) error {
 				}
 			}()
 		}
+	}
+
+	// File event goroutine
+	if fileEvents != nil {
+		go func() {
+			for {
+				record, err := fileEvents.Read()
+				if err != nil {
+					if errors.Is(err, ringbuf.ErrClosed) {
+						return
+					}
+					logger.Log.Errorf("failed to read file ringbuf event: %v", err)
+					continue
+				}
+
+				var event domain.FileEvent
+				if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
+					logger.Log.Debugf("failed to parse file event: %v", err)
+					continue
+				}
+
+				reportEvent := domain.FileReportEvent{
+					ProcessID:   event.Pid,
+					Comm:        utils.TrimNullBytes(event.Comm),
+					Filename:    trimNullBytesLong(event.Filename[:]),
+					Flags:       event.Flags,
+					TimestampUs: event.TsUs,
+				}
+
+				report.WriteFileEvent(reportEvent)
+				logger.Log.Infof("[file] pid=%d comm=%s file=%s flags=%d",
+					event.Pid, reportEvent.Comm, reportEvent.Filename, event.Flags)
+			}
+		}()
 	}
 
 	// DNS event goroutine
@@ -668,6 +739,7 @@ EXIT:
 	report.PrintReportTable()
 	report.PrintDNSTable()
 	report.PrintProcessTable()
+	report.PrintFileTable()
 	report.Close()
 	return nil
 }

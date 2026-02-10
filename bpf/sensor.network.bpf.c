@@ -566,6 +566,60 @@ int trace_fork(struct trace_event_raw_sched_process_fork *ctx) {
 }
 
 /* ========================
+ * File Access Monitoring
+ * ======================== */
+
+struct file_event_t {
+	u64 ts_us;
+	u32 pid;
+	char comm[TASK_COMM_LEN];
+	char filename[MAX_FILENAME_LEN];
+	int flags;
+} __attribute__((packed));
+
+/* Ring buffer for file events */
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 128 * 1024); /* 128 KB */
+} file_events SEC(".maps");
+
+/* Enable/disable flag for file monitoring */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, __u32);
+	__type(value, __u32);
+	__uint(max_entries, 1);
+} file_monitor_map SEC(".maps");
+
+SEC("tracepoint/syscalls/sys_enter_openat")
+int trace_openat(void *ctx) {
+	__u32 key = 0;
+	__u32 *enabled = bpf_map_lookup_elem(&file_monitor_map, &key);
+	if (!enabled || *enabled == 0)
+		return 0;
+
+	struct file_event_t *evt;
+	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	evt->ts_us = bpf_ktime_get_ns() / 1000;
+	evt->pid = bpf_get_current_pid_tgid() >> 32;
+	bpf_get_current_comm(&evt->comm, TASK_COMM_LEN);
+
+	/* Read filename from args[1] (user pointer) */
+	char *filename_ptr;
+	bpf_probe_read(&filename_ptr, sizeof(filename_ptr), (void *)ctx + 24);
+	bpf_probe_read_user_str(&evt->filename, MAX_FILENAME_LEN, filename_ptr);
+
+	/* Read flags from args[2] */
+	bpf_probe_read(&evt->flags, sizeof(evt->flags), (void *)ctx + 32);
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+/* ========================
  * TLS SNI Inspection
  * ======================== */
 

@@ -32,3 +32,9 @@ const EBPFCollectionMapProcessEvents = "process_events"
 
 // EBPFCollectionMapProcessMonitor is the process monitoring enable/disable flag
 const EBPFCollectionMapProcessMonitor = "process_monitor_map"
+
+// EBPFCollectionMapFileEvents is the file events ring buffer
+const EBPFCollectionMapFileEvents = "file_events"
+
+// EBPFCollectionMapFileMonitor is the file monitoring enable/disable flag
+const EBPFCollectionMapFileMonitor = "file_monitor_map"

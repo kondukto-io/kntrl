@@ -49,6 +49,15 @@ func Merge(base, override *PolicyConfig) *PolicyConfig {
 		override.Rules.DNS.AllowedServers...,
 	))
 
+	// Merge file rules
+	if override.Rules.File.Enabled != nil {
+		result.Rules.File.Enabled = override.Rules.File.Enabled
+	}
+	result.Rules.File.MonitoredPaths = dedup(append(
+		result.Rules.File.MonitoredPaths,
+		override.Rules.File.MonitoredPaths...,
+	))
+
 	// Merge webhooks (append)
 	result.Webhooks = append(result.Webhooks, override.Webhooks...)
 
