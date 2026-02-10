@@ -2,12 +2,15 @@ package config
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"net"
 	"os"
 	"strings"
 
 	"github.com/kondukto-io/kntrl/internal/core/domain"
+	"github.com/kondukto-io/kntrl/pkg/github"
+	"github.com/kondukto-io/kntrl/pkg/logger"
 )
 
 const (
@@ -66,6 +69,22 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 	allowMetadata := false
 	if cfg.Rules.Network.AllowMetadata != nil {
 		allowMetadata = *cfg.Rules.Network.AllowMetadata
+	}
+
+	// Fetch dynamic GitHub meta IPs if enabled
+	if allowGithubMeta {
+		actions, web, api, git, err := github.FetchMeta(context.Background())
+		if err != nil {
+			logger.Log.Warnf("failed to fetch GitHub meta (falling back to embedded data): %v", err)
+		} else {
+			var dynamicCIDRs []string
+			dynamicCIDRs = append(dynamicCIDRs, actions...)
+			dynamicCIDRs = append(dynamicCIDRs, web...)
+			dynamicCIDRs = append(dynamicCIDRs, api...)
+			dynamicCIDRs = append(dynamicCIDRs, git...)
+			cidrs = append(cidrs, dynamicCIDRs...)
+			logger.Log.Infof("fetched %d GitHub meta CIDRs dynamically", len(dynamicCIDRs))
+		}
 	}
 
 	// Only add cloud metadata IPs when explicitly opted in
