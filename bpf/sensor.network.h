@@ -7,5 +7,7 @@
 
 #define ETH_P_IP	0x0800		/* Internet Protocol packet	*/
 
+#define AF_INET6 10
+
 #define EVENT_TYPE_FORK 1
 #define EVENT_TYPE_EXEC 2

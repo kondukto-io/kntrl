@@ -44,11 +44,15 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 		}
 	}
 
-	// Resolve hosts to IPs
-	ips = append(ips, host2ip(hosts)...)
+	// Resolve hosts to IPs (both IPv4 and IPv6)
+	v4, v6 := host2ip(hosts)
+	ips = append(ips, v4...)
+	var ipv6s []net.IP
+	ipv6s = append(ipv6s, v6...)
 
 	// Append system IPs (loopback always allowed)
 	ips = append(ips, net.ParseIP(localLoopback).To4())
+	ipv6s = append(ipv6s, net.ParseIP("::1"))
 
 	// Determine boolean flags with defaults
 	allowLocalRanges := true
@@ -80,6 +84,7 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 		AllowedProcesses:   cfg.Rules.Network.AllowedProcesses,
 		AllowedCIDRs:       cidrs,
 		AllowMetadata:      allowMetadata,
+		AllowedIPv6s:       ipv6s,
 	}
 
 	dataBytes, err := json.Marshal(data)
@@ -90,7 +95,7 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 	return dataBytes, data, nil
 }
 
-func host2ip(hosts []string) (ipl []net.IP) {
+func host2ip(hosts []string) (ipv4s []net.IP, ipv6s []net.IP) {
 	for _, h := range hosts {
 		ip, err := net.LookupIP(h)
 		if err != nil {
@@ -98,7 +103,9 @@ func host2ip(hosts []string) (ipl []net.IP) {
 		}
 		for _, v := range ip {
 			if ipv4 := v.To4(); ipv4 != nil {
-				ipl = append(ipl, ipv4)
+				ipv4s = append(ipv4s, ipv4)
+			} else if len(v) == net.IPv6len {
+				ipv6s = append(ipv6s, v)
 			}
 		}
 	}

@@ -59,6 +59,34 @@ struct {
 } ipv4_events SEC(".maps");
 
 /* ========================
+ * IPv6 Monitoring
+ * ======================== */
+
+struct ipv6_event_t {
+	u64 ts_us;
+	u32 pid;
+	u16 af;
+	char task[TASK_COMM_LEN];
+	u8 proto;
+	u8 daddr[16]; /* in6_addr */
+	u16 dport;
+} __attribute__((packed));
+
+/* Ring buffer for IPv6 events */
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 256 * 1024); /* 256 KB */
+} ipv6_events SEC(".maps");
+
+/* Map for allowed IPv6 addresses */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(key_size, 16);
+	__type(value, __u32);
+	__uint(max_entries, MAX_ENTIRES);
+} allowed_ipv6_map SEC(".maps");
+
+/* ========================
  * Process Monitoring
  * ======================== */
 
@@ -300,6 +328,87 @@ int kprobe__tcp_v4_connect(struct pt_regs *ctx) {
 	return 0;
 }
 
+SEC("kprobe/tcp_v6_connect")
+int kprobe__tcp_v6_connect(struct pt_regs *ctx) {
+	struct sockaddr *address = (struct sockaddr *)PT_REGS_PARM2(ctx);
+	if (!address)
+		return 0;
+
+	u16 address_family = 0;
+	bpf_probe_read(&address_family, sizeof(address_family), &address->sa_family);
+	if (address_family != AF_INET6)
+		return 0;
+
+	struct ipv6_event_t *evt6;
+	evt6 = bpf_ringbuf_reserve(&ipv6_events, sizeof(*evt6), 0);
+	if (!evt6)
+		return 0;
+
+	evt6->pid = bpf_get_current_pid_tgid() >> 32;
+	evt6->af = AF_INET6;
+	evt6->proto = IPPROTO_TCP;
+	evt6->ts_us = bpf_ktime_get_ns() / 1000;
+	bpf_get_current_comm(&evt6->task, TASK_COMM_LEN);
+
+	struct sockaddr_in6 *daddr6 = (struct sockaddr_in6 *)address;
+	bpf_probe_read(&evt6->daddr, 16, &daddr6->sin6_addr);
+
+	u16 dport = 0;
+	bpf_probe_read(&dport, sizeof(dport), &daddr6->sin6_port);
+	evt6->dport = bpf_ntohs(dport);
+
+	if (evt6->dport != 0) {
+		bpf_ringbuf_submit(evt6, 0);
+	} else {
+		bpf_ringbuf_discard(evt6, 0);
+	}
+
+	return 0;
+}
+
+SEC("kprobe/udpv6_sendmsg")
+int kprobe__udpv6_sendmsg(struct pt_regs *ctx) {
+	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
+	if (!msg)
+		return 0;
+
+	struct sockaddr *address = NULL;
+	bpf_probe_read(&address, sizeof(address), &msg->msg_name);
+	if (!address)
+		return 0;
+
+	u16 address_family = 0;
+	bpf_probe_read(&address_family, sizeof(address_family), &address->sa_family);
+	if (address_family != AF_INET6)
+		return 0;
+
+	struct ipv6_event_t *evt6;
+	evt6 = bpf_ringbuf_reserve(&ipv6_events, sizeof(*evt6), 0);
+	if (!evt6)
+		return 0;
+
+	evt6->pid = bpf_get_current_pid_tgid() >> 32;
+	evt6->af = AF_INET6;
+	evt6->proto = IPPROTO_UDP;
+	evt6->ts_us = bpf_ktime_get_ns() / 1000;
+	bpf_get_current_comm(&evt6->task, TASK_COMM_LEN);
+
+	struct sockaddr_in6 *daddr6 = (struct sockaddr_in6 *)address;
+	bpf_probe_read(&evt6->daddr, 16, &daddr6->sin6_addr);
+
+	u16 dport = 0;
+	bpf_probe_read(&dport, sizeof(dport), &daddr6->sin6_port);
+	evt6->dport = bpf_ntohs(dport);
+
+	if (evt6->dport != 0) {
+		bpf_ringbuf_submit(evt6, 0);
+	} else {
+		bpf_ringbuf_discard(evt6, 0);
+	}
+
+	return 0;
+}
+
 SEC("tracepoint/sock/inet_sock_set_state")
 int inet_sock_set_state(void *ctx) {
 	struct trace_event_raw_inet_sock_set_state args = {};
@@ -397,6 +506,22 @@ inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 
 	if (iph.version == 4) {
 		bool pass = bpf_map_lookup_elem(&allowed_ip_map, &iph.saddr) || bpf_map_lookup_elem(&allowed_ip_map, &iph.daddr);
+
+		__u32 key = 0;
+		__u32 *mode;
+
+		mode = bpf_map_lookup_elem(&mode_map, &key);
+		if (mode) {
+			if (*mode == MODE_ALLOW) {
+				block = (*mode && pass);
+			}
+		}
+	} else if (iph.version == 6) {
+		struct ipv6hdr ip6h;
+		bpf_skb_load_bytes(skb, 0, &ip6h, sizeof(ip6h));
+
+		bool pass = bpf_map_lookup_elem(&allowed_ipv6_map, &ip6h.saddr) ||
+			    bpf_map_lookup_elem(&allowed_ipv6_map, &ip6h.daddr);
 
 		__u32 key = 0;
 		__u32 *mode;

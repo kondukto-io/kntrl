@@ -18,6 +18,13 @@ type IP4Event struct {
 	// Sport uint16
 }
 
+// IP6Event represents a socket connect event from AF_INET6
+type IP6Event struct {
+	Event
+	Daddr [16]byte // IPv6 destination address
+	Dport uint16   // Destination port
+}
+
 // ReportEvent represents a report event
 type ReportEvent struct {
 	ProcessID          uint32   `json:"pid"`

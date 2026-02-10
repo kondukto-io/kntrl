@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -166,6 +167,25 @@ func Run(cmd cobra.Command) error {
 
 	defer ipV4Events.Close()
 
+	// IPv6 map population and ring buffer
+	allowedIPv6Map := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedIPv6]
+	if allowedIPv6Map != nil {
+		if err := updateAllowedIPv6Maps(allowedIPv6Map, cmddata); err != nil {
+			logger.Log.Warnf("failed to update allowed IPv6 map: %v", err)
+		}
+	}
+
+	var ipv6Events *ringbuf.Reader
+	ipv6EventMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapIPV6Events]
+	if ipv6EventMap != nil {
+		ipv6Events, err = ringbuf.NewReader(ipv6EventMap)
+		if err != nil {
+			logger.Log.Warnf("failed to create ringbuf reader for ipv6 events: %v", err)
+		} else {
+			defer ipv6Events.Close()
+		}
+	}
+
 	// Process monitoring setup
 	monitorProcesses := true
 	if cfg, ok := getProcessConfig(&cmd); ok {
@@ -272,6 +292,11 @@ func Run(cmd cobra.Command) error {
 		if err := ipV4Events.Close(); err != nil {
 			logger.Log.Warnf("closing ipv4 ringbuf reader: %s", err)
 		}
+		if ipv6Events != nil {
+			if err := ipv6Events.Close(); err != nil {
+				logger.Log.Warnf("closing ipv6 ringbuf reader: %s", err)
+			}
+		}
 		if processEvents != nil {
 			if err := processEvents.Close(); err != nil {
 				logger.Log.Warnf("closing process ringbuf reader: %s", err)
@@ -322,6 +347,78 @@ func Run(cmd cobra.Command) error {
 				report.WriteProcessEvent(reportEvent)
 				logger.Log.Infof("[process] %s pid=%d ppid=%d comm=%s file=%s",
 					eventTypeStr, event.Pid, event.PPid, reportEvent.Comm, reportEvent.Filename)
+			}
+		}()
+	}
+
+	// IPv6 event goroutine
+	if ipv6Events != nil {
+		go func() {
+			for {
+				record, err := ipv6Events.Read()
+				if err != nil {
+					if errors.Is(err, ringbuf.ErrClosed) {
+						return
+					}
+					logger.Log.Errorf("failed to read ipv6 ringbuf event: %v", err)
+					continue
+				}
+
+				var event domain.IP6Event
+				if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
+					logger.Log.Debugf("failed to parse ipv6 event: %v", err)
+					continue
+				}
+
+				domainAddress := utils.BytesToIPv6(event.Daddr)
+				domainNames, err := utils.LookupAndTrim(domainAddress)
+				if err != nil {
+					logger.Log.Debugf("failed to lookup ipv6 domain: [%s] %v", domainAddress.String(), err)
+					domainNames = append(domainNames, ".")
+				}
+
+				taskname := utils.TrimNullBytes(event.Task)
+				if taskname == progName {
+					continue
+				}
+
+				protocol := utils.GetProtocol(event.Proto)
+				var policyStatus = domain.EventPolicyStatusPass
+
+				var reportEvent = domain.ReportEvent{
+					ProcessID:          event.Pid,
+					TaskName:           taskname,
+					Protocol:           protocol,
+					DestinationAddress: domainAddress.String(),
+					DestinationPort:    event.Dport,
+					Domains:            domainNames,
+					Policy:             policyStatus,
+				}
+
+				if tracerMode != domain.TracerModeMonitor {
+					result, err := bundlePolicy.EvalEvent(context.Background(), reportEvent)
+					if err != nil {
+						logger.Log.Debugf("ipv6 policy eval failed: %v", err)
+						continue
+					}
+					if result {
+						policyStatus = domain.EventPolicyStatusPass
+						if allowedIPv6Map != nil {
+							var addrKey [16]byte
+							copy(addrKey[:], event.Daddr[:])
+							if err := allowedIPv6Map.Put(addrKey, uint32(1)); err != nil {
+								logger.Log.Warnf("failed to update ipv6 allow list: %v", err)
+							}
+						}
+					} else {
+						policyStatus = domain.EventPolicyStatusBlock
+					}
+					reportEvent.Policy = policyStatus
+				}
+
+				report.WriteEvent(reportEvent)
+				logger.Log.Infof("[%d]%s -> %s:%d (%s) [%s/ipv6]| %s",
+					event.Pid, taskname, domainAddress, event.Dport, domainNames, protocol, policyStatus)
 			}
 		}()
 	}
@@ -447,6 +544,20 @@ func updateAllowedIPMaps(allowedIPMap *ebpf.Map, arg *domain.Data) error {
 			ipUint32 = binary.LittleEndian.Uint32(ip)
 		}
 		if err := allowedIPMap.Put(ipUint32, uint32(1)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func updateAllowedIPv6Maps(allowedIPv6Map *ebpf.Map, arg *domain.Data) error {
+	for _, ip := range arg.AllowedIPv6s {
+		if len(ip) != net.IPv6len {
+			continue
+		}
+		var key [16]byte
+		copy(key[:], ip)
+		if err := allowedIPv6Map.Put(key, uint32(1)); err != nil {
 			return err
 		}
 	}

@@ -12,6 +12,12 @@ const EBPFCollectionMapAllowedHost = "allowed_hosts_map"
 // EBPFCollectionMapIPV4Events is the IPv4 events ring buffer of the EBPF collection map
 const EBPFCollectionMapIPV4Events = "ipv4_events"
 
+// EBPFCollectionMapIPV6Events is the IPv6 events ring buffer
+const EBPFCollectionMapIPV6Events = "ipv6_events"
+
+// EBPFCollectionMapAllowedIPv6 is the allow list for IPv6 addresses
+const EBPFCollectionMapAllowedIPv6 = "allowed_ipv6_map"
+
 // EBPFCollectionMapProcessEvents is the process events ring buffer
 const EBPFCollectionMapProcessEvents = "process_events"
 

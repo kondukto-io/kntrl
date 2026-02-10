@@ -90,3 +90,10 @@ func IntToIP(ipNum uint32) net.IP {
 	binary.LittleEndian.PutUint32(ip, ipNum)
 	return ip
 }
+
+// BytesToIPv6 converts a 16-byte array to an IPv6 net.IP
+func BytesToIPv6(addr [16]byte) net.IP {
+	ip := make(net.IP, 16)
+	copy(ip, addr[:])
+	return ip
+}

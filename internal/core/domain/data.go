@@ -23,4 +23,6 @@ type Data struct {
 	// AllowMetadata controls access to cloud metadata endpoints
 	// (169.254.169.254 for AWS/GCP, 168.63.129.16 for Azure).
 	AllowMetadata bool `json:"allow_metadata"`
+	// AllowedIPv6s are allowed IPv6 addresses.
+	AllowedIPv6s []net.IP `json:"allowed_ipv6s,omitempty"`
 }
