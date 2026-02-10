@@ -18,6 +18,7 @@ type NetworkRules struct {
 	AllowedIPs       []string `yaml:"allowed_ips"`
 	AllowLocalRanges *bool    `yaml:"allow_local_ranges"`
 	AllowGithubMeta  *bool    `yaml:"allow_github_meta"`
+	AllowMetadata    *bool    `yaml:"allow_metadata"`
 	AllowedProcesses []string `yaml:"allowed_processes"`
 }
 
@@ -27,6 +28,7 @@ type CLIFlags struct {
 	AllowedIPs       string
 	AllowLocalRanges *bool
 	AllowGithubMeta  *bool
+	AllowMetadata    *bool
 	Mode             string
 	RulesFile        string
 	RulesDir         string

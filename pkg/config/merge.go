@@ -34,6 +34,9 @@ func Merge(base, override *PolicyConfig) *PolicyConfig {
 	if override.Rules.Network.AllowGithubMeta != nil {
 		result.Rules.Network.AllowGithubMeta = override.Rules.Network.AllowGithubMeta
 	}
+	if override.Rules.Network.AllowMetadata != nil {
+		result.Rules.Network.AllowMetadata = override.Rules.Network.AllowMetadata
+	}
 
 	return &result
 }
@@ -72,6 +75,9 @@ func ApplyCLIFlags(cfg *PolicyConfig, flags CLIFlags) *PolicyConfig {
 	}
 	if flags.AllowGithubMeta != nil {
 		result.Rules.Network.AllowGithubMeta = flags.AllowGithubMeta
+	}
+	if flags.AllowMetadata != nil {
+		result.Rules.Network.AllowMetadata = flags.AllowMetadata
 	}
 
 	return &result

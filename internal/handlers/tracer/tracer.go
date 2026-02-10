@@ -345,6 +345,10 @@ func gatherCLIFlags(cmd *cobra.Command) config.CLIFlags {
 		val, _ := cmd.Flags().GetBool("allow-github-meta")
 		flags.AllowGithubMeta = &val
 	}
+	if cmd.Flags().Changed("allow-metadata") {
+		val, _ := cmd.Flags().GetBool("allow-metadata")
+		flags.AllowMetadata = &val
+	}
 
 	return flags
 }
@@ -391,11 +395,16 @@ func parseFlags(cmd *cobra.Command) (*domain.Data, error) {
 	if err != nil {
 		return nil, err
 	}
+	allowmeta, err := cmd.Flags().GetBool("allow-metadata")
+	if err != nil {
+		return nil, err
+	}
 
 	return parser.ToDataJson(
 		allowedHostsFlag.Value.String(),
 		allowedIPAddrFlag.Value.String(),
 		ghmeta,
 		localranges,
+		allowmeta,
 	), nil
 }

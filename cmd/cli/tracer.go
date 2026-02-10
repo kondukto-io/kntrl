@@ -37,6 +37,7 @@ func initTracerCommand() *cobra.Command {
 	tracerCMD.Flags().String("mode", "monitor", "trace || monitor")
 	tracerCMD.Flags().Bool("allow-local-ranges", true, "allows access to local IP ranges")
 	tracerCMD.Flags().Bool("allow-github-meta", false, "allows access to GitHub meta IP ranges (https://api.github.com/meta)")
+	tracerCMD.Flags().Bool("allow-metadata", false, "allows access to cloud metadata endpoints (169.254.169.254, 168.63.129.16)")
 	tracerCMD.Flags().Bool("daemonize", false, "daemonize process")
 	tracerCMD.Flags().String("allowed-hosts", "", "enter allowed hostnames (example.com, .github.com)")
 	tracerCMD.Flags().String("allowed-ips", "", "enter allowed IP addresses")

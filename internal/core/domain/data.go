@@ -20,4 +20,7 @@ type Data struct {
 	AllowedProcesses []string `json:"allowed_processes,omitempty"`
 	// Allowed CIDR ranges.
 	AllowedCIDRs []string `json:"allowed_cidrs,omitempty"`
+	// AllowMetadata controls access to cloud metadata endpoints
+	// (169.254.169.254 for AWS/GCP, 168.63.129.16 for Azure).
+	AllowMetadata bool `json:"allow_metadata"`
 }

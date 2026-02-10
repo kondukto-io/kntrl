@@ -47,12 +47,8 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 	// Resolve hosts to IPs
 	ips = append(ips, host2ip(hosts)...)
 
-	// Append system IPs
-	ips = append(ips,
-		net.ParseIP(localLoopback).To4(),
-		net.ParseIP(linkLocal).To4(),
-		net.ParseIP(azureMeta).To4(),
-	)
+	// Append system IPs (loopback always allowed)
+	ips = append(ips, net.ParseIP(localLoopback).To4())
 
 	// Determine boolean flags with defaults
 	allowLocalRanges := true
@@ -63,6 +59,18 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 	if cfg.Rules.Network.AllowGithubMeta != nil {
 		allowGithubMeta = *cfg.Rules.Network.AllowGithubMeta
 	}
+	allowMetadata := false
+	if cfg.Rules.Network.AllowMetadata != nil {
+		allowMetadata = *cfg.Rules.Network.AllowMetadata
+	}
+
+	// Only add cloud metadata IPs when explicitly opted in
+	if allowMetadata {
+		ips = append(ips,
+			net.ParseIP(linkLocal).To4(),
+			net.ParseIP(azureMeta).To4(),
+		)
+	}
 
 	data := &domain.Data{
 		AllowedHosts:       dedup(hosts),
@@ -71,6 +79,7 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 		AllowLocalIPRanges: allowLocalRanges,
 		AllowedProcesses:   cfg.Rules.Network.AllowedProcesses,
 		AllowedCIDRs:       cidrs,
+		AllowMetadata:      allowMetadata,
 	}
 
 	dataBytes, err := json.Marshal(data)

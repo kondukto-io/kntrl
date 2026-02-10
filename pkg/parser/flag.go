@@ -15,10 +15,10 @@ const (
 	azureMeta     = "168.63.129.16"
 )
 
-func ToDataJson(allowed_hosts, allowed_ips string, ghrange, localrange bool) *domain.Data {
+func ToDataJson(allowed_hosts, allowed_ips string, ghrange, localrange, allowmeta bool) *domain.Data {
 	hosts, ips := getDNSServers()
 	hosts = append(hosts, parseAllowedHosts(allowed_hosts)...)
-	ips = append(ips, parseAllowedIPAddr(allowed_ips)...)
+	ips = append(ips, parseAllowedIPAddr(allowed_ips, allowmeta)...)
 	ips = append(ips, host2ip(hosts)...)
 
 	return &domain.Data{
@@ -26,10 +26,11 @@ func ToDataJson(allowed_hosts, allowed_ips string, ghrange, localrange bool) *do
 		AllowedIPs:         ips,
 		AllowGithubMeta:    ghrange,
 		AllowLocalIPRanges: localrange,
+		AllowMetadata:      allowmeta,
 	}
 }
 
-func parseAllowedIPAddr(ips string) (iplist []net.IP) {
+func parseAllowedIPAddr(ips string, allowmeta bool) (iplist []net.IP) {
 	for _, ip := range strings.Split(ips, ",") {
 		if i := net.ParseIP(ip); i == nil {
 			continue
@@ -38,11 +39,15 @@ func parseAllowedIPAddr(ips string) (iplist []net.IP) {
 		}
 	}
 
-	iplist = append(iplist,
-		net.ParseIP(localLoopback).To4(),
-		net.ParseIP(linkLocal).To4(),
-		net.ParseIP(azureMeta).To4(),
-	)
+	iplist = append(iplist, net.ParseIP(localLoopback).To4())
+
+	// Only add cloud metadata IPs when explicitly opted in
+	if allowmeta {
+		iplist = append(iplist,
+			net.ParseIP(linkLocal).To4(),
+			net.ParseIP(azureMeta).To4(),
+		)
+	}
 
 	return iplist
 }

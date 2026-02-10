@@ -13,6 +13,7 @@ rules:
       - "172.16.0.0/12"
     allow_local_ranges: true
     allow_github_meta: true
+    allow_metadata: false
     allowed_processes:
       - "curl"
       - "git"
