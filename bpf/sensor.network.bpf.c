@@ -13,48 +13,54 @@
 
 #include "sensor.network.h"
 
-///* Map for allowed IP addresses (hosts) from userspace */
-struct bpf_map_def SEC("maps") allowed_ip_map = {
-	.type = BPF_MAP_TYPE_HASH,
-	.key_size = sizeof(__u32),
-	.value_size = sizeof(__u32),
-	.max_entries = MAX_ENTIRES,
-};
+/* ========================
+ * Map Definitions (BTF style)
+ * ======================== */
 
-struct bpf_map_def SEC("maps") allowed_hosts_map = {
-	.type = BPF_MAP_TYPE_HASH,
-	//.key_size = sizeof(char) * MAX_HOSTNAME_LEN,
-	.key_size = 256,
-	.value_size = sizeof(__u32),
-	.max_entries = MAX_ENTIRES,
-};
+/* Map for allowed IP addresses from userspace */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, __u32);
+	__type(value, __u32);
+	__uint(max_entries, MAX_ENTIRES);
+} allowed_ip_map SEC(".maps");
 
-///* Map to pass mode to filter function */
-struct bpf_map_def SEC("maps") mode_map = {
-	.type = BPF_MAP_TYPE_HASH,
-	.key_size = sizeof(__u32),
-	.value_size = sizeof(__u32),
-	.max_entries = 1,
-};
+/* Map for allowed hostnames from userspace */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(key_size, MAX_HOSTNAME_LEN);
+	__type(value, __u32);
+	__uint(max_entries, MAX_ENTIRES);
+} allowed_hosts_map SEC(".maps");
 
+/* Map to pass mode to filter function */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, __u32);
+	__type(value, __u32);
+	__uint(max_entries, 1);
+} mode_map SEC(".maps");
+
+/* Event structure for IPv4 connection events */
 struct ipv4_event_t {
-    u64 ts_us;
-    u32 pid;
-    u16 af;
-    char task[TASK_COMM_LEN];
-    u8 proto;
-    u32 daddr;
-    u16 dport;
+	u64 ts_us;
+	u32 pid;
+	u16 af;
+	char task[TASK_COMM_LEN];
+	u8 proto;
+	u32 daddr;
+	u16 dport;
 } __attribute__((packed));
 
+/* Ring buffer for sending events to userspace */
 struct {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 256 * 1024); /* 256 KB */
 } ipv4_events SEC(".maps");
 
-struct {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-} ipv4_closed_events SEC(".maps");
-
+/* ========================
+ * Helper Functions
+ * ======================== */
 
 static __always_inline int parse_dns_response(int ans_count, unsigned long offset) {
 	unsigned long new_offset = offset;
@@ -69,11 +75,6 @@ static __always_inline int parse_dns_response(int ans_count, unsigned long offse
 			return ret;
 		}
 
-		bpf_printk("   => [%d] debug dns response :: Record=%x(%d) Class=%x(%d) TTL=%d Len=%d | ANS_COUNT=%d", i, 
-				resp.record_type,bpf_ntohs(resp.record_type), resp.class, bpf_ntohs(resp.class),  
-				bpf_ntohs(resp.ttl), bpf_ntohs(resp.data_length), ans_count);
-
-		// if TYPE A (5) and CLASS IN (0x0001)
 		if (bpf_ntohs(resp.record_type) == 1 && bpf_ntohs(resp.class) == 1) {
 			uint32_t address;
 			ret = bpf_probe_read(&address, sizeof(address), (uint32_t *)(new_offset + sizeof(resp)));
@@ -81,10 +82,6 @@ static __always_inline int parse_dns_response(int ans_count, unsigned long offse
 				bpf_printk("ERR reading address (answer)");
 				return ret;
 			}
-
-			// TODO: 
-			// get pid and populate a map to send A records to perf array
-			//u32 pid = bpf_get_current_pid_tgid() >> 32;
 
 			__u32 val = 0;
 			bpf_map_update_elem(&allowed_ip_map, &address, &val, BPF_ANY);
@@ -95,7 +92,7 @@ static __always_inline int parse_dns_response(int ans_count, unsigned long offse
 	return 0;
 }
 
-// Taken from: 
+// Taken from:
 // https://github.com/DataDog/datadog-agent/blob/main/pkg/network/ebpf/c/skb.h
 static __always_inline unsigned char* sk_buff_head(struct sk_buff *skb) {
 	unsigned char *h = NULL;
@@ -115,15 +112,14 @@ static __always_inline u16 __strlen(char *ptr) {
 	for (int i = 0; i < 256; i++) {
 		if (*ptr == '\0')
 			break;
-		if (*ptr < 32 || *ptr > 126) 
+		if (*ptr < 32 || *ptr > 126)
 			*ptr = '.';
-		len++; 
+		len++;
 		ptr++;
 	}
 
 	return len;
 }
-
 
 static __always_inline int __is_allowed_host(char *hostname) {
 	if (bpf_map_lookup_elem(&allowed_hosts_map, hostname) != NULL)
@@ -138,7 +134,6 @@ static int __attribute__((always_inline)) handle_event(struct ipv4_event_t *evt4
 
 	bpf_probe_read(&address_family, sizeof(address_family), &address->sa_family);
 
-	// handle IP event only
 	if (address_family == AF_INET) {
 		evt4->pid = pid;
 		evt4->af = address_family;
@@ -149,7 +144,7 @@ static int __attribute__((always_inline)) handle_event(struct ipv4_event_t *evt4
 		bpf_probe_read(&evt4->daddr, sizeof(evt4->daddr), &daddr->sin_addr.s_addr);
 
 		u16 dport = 0;
-	    	bpf_probe_read(&dport, sizeof(dport), &daddr->sin_port);
+		bpf_probe_read(&dport, sizeof(dport), &daddr->sin_port);
 		evt4->dport = bpf_ntohs(dport);
 
 		bpf_get_current_comm(&evt4->task, TASK_COMM_LEN);
@@ -158,16 +153,20 @@ static int __attribute__((always_inline)) handle_event(struct ipv4_event_t *evt4
 			return 1;
 		}
 	}
-		
+
 	return 0;
 }
+
+/* ========================
+ * BPF Programs
+ * ======================== */
 
 SEC("kprobe/skb_consume_udp")
 int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 	struct sk_buff *skb = (struct sk_buff *)PT_REGS_PARM2(ctx);
 	if (!skb) {
 		return 0;
-	} 
+	}
 
 	int len = (int) PT_REGS_PARM3(ctx);
 	if (len < 0) {
@@ -191,8 +190,6 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 		return ret;
 	}
 
-	//bpf_printk("checking IP header version=%d protocol=%d", iph.version, iph.protocol);
-
 	struct udphdr udph = {};
 	ret = bpf_probe_read(&udph, sizeof(udph), (struct udph *)(head + net_head + sizeof(iph)));
 	if (ret) {
@@ -200,43 +197,32 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 		return ret;
 	}
 
-	//bpf_printk("checking UDP header source=%d dest=%d Len=%d", bpf_ntohs(udph.source), bpf_ntohs(udph.dest), bpf_ntohs(udph.len));
-
 	if (bpf_ntohs(udph.source) == 53 || bpf_ntohs(udph.dest) == 53) {
-		// get the dns header
 		struct dns_hdr dnsh = {};
-		ret = bpf_probe_read(&dnsh, sizeof(dnsh), (struct dnsh *)(head + net_head + sizeof(iph)+ sizeof(udph)));
+		ret = bpf_probe_read(&dnsh, sizeof(dnsh), (struct dnsh *)(head + net_head + sizeof(iph) + sizeof(udph)));
 		if (ret) {
 			bpf_printk("ERR reading dnsh");
 			return ret;
 		}
 
-		// sanity check 
-		// qr == 1 message is response 
-		// opcode == 0 standard query
+		// qr == 1: message is response
+		// opcode == 0: standard query
 		if (dnsh.qr == 1 && dnsh.opcode == 0) {
-			bpf_printk(" => We have a dns response | Transaction ID=0x%x", bpf_ntohs(dnsh.transaction_id));
+			bpf_printk("dns response | Transaction ID=0x%x", bpf_ntohs(dnsh.transaction_id));
 
-			// read the domain name (response)
-			// MAX_DNSNAME
 			char buff[256];
 			int ret = bpf_probe_read(&buff, sizeof(buff), (char *)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh)));
 			if (ret) {
 				bpf_printk("ERR reading dns query");
 				return ret;
 			}
-			
-			// TODO: check domain name (allowed hosts)
+
 			size_t len = __strlen(buff);
 
-			//__is_allowed_host(buff);
-			if (!__is_allowed_host(buff))
-			{
-				bpf_printk(" ||||| strcmp == 0 [%s] |||||| exiting...", buff);
+			if (!__is_allowed_host(buff)) {
 				return 0;
 			}
 
-			// read record type and class (queries)
 			uint32_t rc;
 			ret = bpf_probe_read(&rc, sizeof(rc), (uint32_t *)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh) + (len + 1)));
 			if (ret) {
@@ -247,14 +233,8 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 			uint16_t record_type = bpf_ntohs(rc & 0x0000FFFF);
 			uint16_t class = (bpf_ntohs(rc >> 16) & 0x0000FFFF);
 
-			// record type == A and class == IN
 			if (record_type == 1 && class == 1) {
-				// we have a HOST record
-				//bpf_printk("   => We have a HOST record | Record Type=0x%x and Class=0x%x", record_type, class);
-				//bpf_printk("   => AnswerCount=%d Domain: %s", bpf_ntohs(dnsh.ans_count), buff);
-
 				unsigned long offset = (unsigned long)(head + net_head + sizeof(iph) + sizeof(udph) + sizeof(dnsh) + (len + 1) + sizeof(rc));
-
 				parse_dns_response(bpf_ntohs(dnsh.ans_count), offset);
 			}
 		}
@@ -262,7 +242,6 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 
 	return 0;
 }
-
 
 SEC("kprobe/ip4_datagram_connect")
 int kprobe__ip4_datagram_connect(struct pt_regs *ctx) {
@@ -273,10 +252,8 @@ int kprobe__ip4_datagram_connect(struct pt_regs *ctx) {
 
 	struct ipv4_event_t evt4 = {};
 	if (handle_event(&evt4, address, IPPROTO_UDP)) {
-	            bpf_perf_event_output(ctx, &ipv4_events, BPF_F_CURRENT_CPU, &evt4, sizeof(evt4));
+		bpf_ringbuf_output(&ipv4_events, &evt4, sizeof(evt4), 0);
 	}
-
-	bpf_printk("kprobe:ip4_datagram_connect - handle event pid=%d AF=%d Proto=%d IP=%pI4", evt4.pid, evt4.af, evt4.proto, evt4.daddr);
 
 	return 0;
 }
@@ -290,26 +267,23 @@ int kprobe__tcp_v4_connect(struct pt_regs *ctx) {
 
 	struct ipv4_event_t evt4 = {};
 	if (handle_event(&evt4, address, IPPROTO_TCP)) {
-	            bpf_perf_event_output(ctx, &ipv4_events, BPF_F_CURRENT_CPU, &evt4, sizeof(evt4));
+		bpf_ringbuf_output(&ipv4_events, &evt4, sizeof(evt4), 0);
 	}
-	bpf_printk("kprobe:tcp_v4_connect - handle event pid=%d AF=%d Proto=%d IP=%pI4", evt4.pid, evt4.af, evt4.proto, evt4.daddr);
 
 	return 0;
 }
 
 SEC("tracepoint/sock/inet_sock_set_state")
 int inet_sock_set_state(void *ctx) {
-  	struct trace_event_raw_inet_sock_set_state args = {};
-  	if (bpf_core_read(&args, sizeof(args), ctx) < 0) {
+	struct trace_event_raw_inet_sock_set_state args = {};
+	if (bpf_core_read(&args, sizeof(args), ctx) < 0) {
 		return 0;
-  	}
+	}
 
-	// if not tcp protocol, ignore
 	if (BPF_CORE_READ(&args, protocol) != IPPROTO_TCP) {
 		return 0;
 	}
 
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	int oldstate;
 	int newstate;
 
@@ -320,27 +294,25 @@ int inet_sock_set_state(void *ctx) {
 	__builtin_memcpy(&daddr, &args.daddr, sizeof(daddr));
 
 	__u32 val = 0;
-	__be32 *p32;
-	p32 = (__be32 *)daddr;
-	bpf_printk("tracepoint:=%d oldstate=%d newstate=%d daddr=%pI4", pid, oldstate, newstate, p32);
 
-	if (oldstate == BPF_TCP_ESTABLISHED){
+	if (oldstate == BPF_TCP_ESTABLISHED) {
 		bpf_map_update_elem(&allowed_ip_map, &daddr, &val, BPF_ANY);
 	}
 
 	return 0;
 }
 
+/* ========================
+ * Cgroup Egress Filter
+ * ======================== */
+
 inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 	bool block = true;
 
-	// INFO: ingress context is usually a kernel thread or a running task
 	struct iphdr iph;
-	// load packet header
 	bpf_skb_load_bytes(skb, 0, &iph, sizeof(struct iphdr));
 
-	// refactor
-	if (iph.version == 4){
+	if (iph.version == 4) {
 		bool pass = bpf_map_lookup_elem(&allowed_ip_map, &iph.saddr) || bpf_map_lookup_elem(&allowed_ip_map, &iph.daddr);
 
 		__u32 key = 0;
@@ -354,11 +326,9 @@ inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 		}
 	}
 
-	// 0 block || 1 pass
 	return block;
 }
 
-//
 SEC("cgroup_skb/egress")
 int egress(struct __sk_buff *skb) {
 	return (int)handle_pkt(skb, true);

@@ -14,13 +14,14 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/kondukto-io/kntrl/bundle"
 	"github.com/kondukto-io/kntrl/internal/core/domain"
+	"github.com/kondukto-io/kntrl/pkg/config"
 	ebpfman "github.com/kondukto-io/kntrl/pkg/ebpf"
 	"github.com/kondukto-io/kntrl/pkg/logger"
 	"github.com/kondukto-io/kntrl/pkg/parser"
@@ -53,6 +54,7 @@ func init() {
 func Run(cmd cobra.Command) error {
 	var bundleFS = bundle.Bundle
 
+	// Determine tracer mode
 	var tracerMode = cmd.Flag("mode").Value.String()
 	if tracerMode == "" {
 		return errors.New("[mode] flag is required")
@@ -62,17 +64,50 @@ func Run(cmd cobra.Command) error {
 		return fmt.Errorf("[mode] flag is invalid: %s", tracerMode)
 	}
 
-	cmddata, err := parseFlags(&cmd)
-	if err != nil {
-		return fmt.Errorf("data json error: %w", err)
+	// Load configuration from all sources (YAML files, directories, CLI flags)
+	rulesFile, _ := cmd.Flags().GetString("rules-file")
+	rulesDir, _ := cmd.Flags().GetString("rules-dir")
+
+	var dataObj []byte
+	var cmddata *domain.Data
+	var externalRegoFiles []string
+
+	if rulesFile != "" || rulesDir != "" {
+		// New config system: load from YAML + directory + CLI flags
+		cliFlags := gatherCLIFlags(&cmd)
+		policyCfg, regoFiles, err := config.LoadAll(rulesFile, rulesDir, cliFlags)
+		if err != nil {
+			return fmt.Errorf("config loading error: %w", err)
+		}
+
+		// Override mode from config if CLI didn't set it explicitly
+		if policyCfg.Mode != "" {
+			tracerMode = policyCfg.Mode
+		}
+
+		dataBytes, data, err := config.ToOPAData(policyCfg)
+		if err != nil {
+			return fmt.Errorf("config conversion error: %w", err)
+		}
+		dataObj = dataBytes
+		cmddata = data
+		externalRegoFiles = regoFiles
+	} else {
+		// Legacy: CLI flags only
+		data, err := parseFlags(&cmd)
+		if err != nil {
+			return fmt.Errorf("data json error: %w", err)
+		}
+		cmddata = data
+
+		obj, err := json.Marshal(cmddata)
+		if err != nil {
+			return fmt.Errorf("error converting dataobj: %w", err)
+		}
+		dataObj = obj
 	}
 
-	dataObj, err := json.Marshal(cmddata)
-	if err != nil {
-		return fmt.Errorf("error converting dataobj: %w", err)
-	}
-
-	bundlePolicy, err := policy.New(bundleFS, dataObj)
+	bundlePolicy, err := policy.New(bundleFS, dataObj, policy.WithExternalRego(externalRegoFiles))
 	if err != nil {
 		return fmt.Errorf("policy init error: %w", err)
 	}
@@ -88,14 +123,12 @@ func Run(cmd cobra.Command) error {
 
 	switch tracerMode {
 	case domain.TracerModeTrace:
-		// set mode for filtering
 		modeMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapMode]
 		if err := modeMap.Put(uint32(0), uint32(domain.TracerModeIndexTrace)); err != nil {
 			logger.Log.Fatalf("failed to set mode: %v", err)
 		}
 
 	case domain.TracerModeMonitor:
-		// set mode for filtering
 		modeMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapMode]
 		if err := modeMap.Put(uint32(0), uint32(domain.TracerModeIndexMonitor)); err != nil {
 			logger.Log.Fatalf("failed to set mode: %v", err)
@@ -109,37 +142,29 @@ func Run(cmd cobra.Command) error {
 	err = updateAllowedIPMaps(allowedIPMap, cmddata)
 	if err != nil {
 		logger.Log.Fatalf("failed to update allow ip (map): %v", err)
-
 	}
 
-	allowedHostMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedIP]
+	allowedHostMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedHost]
 	err = updateAllowedHostMap(allowedHostMap, cmddata)
 	if err != nil {
 		logger.Log.Fatalf("failed to update allow host (map): %v", err)
 	}
 
+	// Create ring buffer reader for IPv4 events
 	ipv4EventMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapIPV4Events]
-	ipV4Events, err := perf.NewReader(ipv4EventMap, 4096)
+	ipV4Events, err := ringbuf.NewReader(ipv4EventMap)
 	if err != nil {
-		logger.Log.Fatalf("failed to read ipv4 events: %v", err)
+		logger.Log.Fatalf("failed to create ringbuf reader for ipv4 events: %v", err)
 	}
 
 	defer ipV4Events.Close()
 
-	ipv4ClosedMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapIPV4ClosedEvents]
-	ipV4ClosedEvent, err := perf.NewReader(ipv4ClosedMap, 4096)
-	if err != nil {
-		logger.Log.Fatalf("failed to read ipv4 closed events: %v", err)
-	}
-
-	defer ipV4ClosedEvent.Close()
-
-	// allocate memory
+	// Remove memory lock restrictions for eBPF programs
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return err
 	}
 
-	// loop and link
+	// Loop and link eBPF programs
 	for name, spec := range ebpfClient.Spec.Programs {
 		prg := ebpfClient.Collection.Programs[name]
 		logger.Log.WithFields(
@@ -150,7 +175,6 @@ func Run(cmd cobra.Command) error {
 
 		switch spec.Type {
 		case ebpf.Kprobe:
-			// link Krobe
 			logger.Log.Infof("linking Kprobe [%s]", utils.ParseProgramName(prg))
 			l, err := link.Kprobe(spec.AttachTo, prg, nil)
 			if err != nil {
@@ -202,13 +226,13 @@ func Run(cmd cobra.Command) error {
 	done := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL, syscall.SIGQUIT, syscall.SIGHUP)
 
-	// signal handler
+	// Signal handler
 	go func() {
 		<-sigs
 		done <- true
 
 		if err := ipV4Events.Close(); err != nil {
-			logger.Log.Warnf("closing perf reader: %s", err)
+			logger.Log.Warnf("closing ringbuf reader: %s", err)
 		}
 	}()
 
@@ -216,23 +240,23 @@ func Run(cmd cobra.Command) error {
 
 	report := reporter.NewReporter(outputDir)
 	if report.Err != nil {
-		logger.Log.Fatalf("failed to read ipv4 closed events: %s", err)
+		logger.Log.Fatalf("failed to create reporter: %s", report.Err)
 	}
 
-	// IPv4Events
+	// Event processing loop
 	for {
 		record, err := ipV4Events.Read()
 		if err != nil {
-			if errors.Is(err, perf.ErrClosed) {
+			if errors.Is(err, ringbuf.ErrClosed) {
 				goto EXIT
 			}
-			logger.Log.Errorf("failed to read perf event: %v", err)
+			logger.Log.Errorf("failed to read ringbuf event: %v", err)
 			continue
 		}
 
 		var event domain.IP4Event
 		if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
-			logger.Log.Printf("failed to parse perf event: %b", err)
+			logger.Log.Printf("failed to parse ringbuf event: %v", err)
 			continue
 		}
 
@@ -243,7 +267,7 @@ func Run(cmd cobra.Command) error {
 			domainNames = append(domainNames, ".")
 		}
 
-		// evaluate policy
+		// Evaluate policy
 		var policyStatus = domain.EventPolicyStatusPass
 		taskname := utils.TrimNullBytes(event.Task)
 		if taskname == progName {
@@ -262,7 +286,7 @@ func Run(cmd cobra.Command) error {
 			Policy:             policyStatus,
 		}
 
-		// policy logic
+		// Policy logic
 		if tracerMode != domain.TracerModeMonitor {
 			result, err := bundlePolicy.EvalEvent(context.Background(), reportEvent)
 			if err != nil {
@@ -283,7 +307,7 @@ func Run(cmd cobra.Command) error {
 			reportEvent.Policy = policyStatus
 		}
 
-		// report
+		// Report
 		report.WriteEvent(reportEvent)
 
 		logger.Log.Infof("[%d]%s -> %s:%d (%s) [%s]| %s",
@@ -302,6 +326,27 @@ EXIT:
 	report.PrintReportTable()
 	report.Close()
 	return nil
+}
+
+func gatherCLIFlags(cmd *cobra.Command) config.CLIFlags {
+	flags := config.CLIFlags{}
+
+	flags.AllowedHosts, _ = cmd.Flags().GetString("allowed-hosts")
+	flags.AllowedIPs, _ = cmd.Flags().GetString("allowed-ips")
+	flags.Mode = cmd.Flag("mode").Value.String()
+	flags.RulesFile, _ = cmd.Flags().GetString("rules-file")
+	flags.RulesDir, _ = cmd.Flags().GetString("rules-dir")
+
+	if cmd.Flags().Changed("allow-local-ranges") {
+		val, _ := cmd.Flags().GetBool("allow-local-ranges")
+		flags.AllowLocalRanges = &val
+	}
+	if cmd.Flags().Changed("allow-github-meta") {
+		val, _ := cmd.Flags().GetBool("allow-github-meta")
+		flags.AllowGithubMeta = &val
+	}
+
+	return flags
 }
 
 func updateAllowedIPMaps(allowedIPMap *ebpf.Map, arg *domain.Data) error {
