@@ -38,6 +38,9 @@ func Merge(base, override *PolicyConfig) *PolicyConfig {
 		result.Rules.Network.AllowMetadata = override.Rules.Network.AllowMetadata
 	}
 
+	// Merge network profiles (append)
+	result.Rules.Network.Profiles = append(result.Rules.Network.Profiles, override.Rules.Network.Profiles...)
+
 	// Merge process rules
 	if override.Rules.Process.Enabled != nil {
 		result.Rules.Process.Enabled = override.Rules.Process.Enabled

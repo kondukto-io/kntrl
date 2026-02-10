@@ -41,12 +41,20 @@ type ProcessRules struct {
 
 // NetworkRules contains network-related policy rules.
 type NetworkRules struct {
-	AllowedHosts     []string `yaml:"allowed_hosts"`
-	AllowedIPs       []string `yaml:"allowed_ips"`
-	AllowLocalRanges *bool    `yaml:"allow_local_ranges"`
-	AllowGithubMeta  *bool    `yaml:"allow_github_meta"`
-	AllowMetadata    *bool    `yaml:"allow_metadata"`
-	AllowedProcesses []string `yaml:"allowed_processes"`
+	AllowedHosts     []string         `yaml:"allowed_hosts"`
+	AllowedIPs       []string         `yaml:"allowed_ips"`
+	AllowLocalRanges *bool            `yaml:"allow_local_ranges"`
+	AllowGithubMeta  *bool            `yaml:"allow_github_meta"`
+	AllowMetadata    *bool            `yaml:"allow_metadata"`
+	AllowedProcesses []string         `yaml:"allowed_processes"`
+	Profiles         []ProcessProfile `yaml:"profiles"`
+}
+
+// ProcessProfile defines per-process network access rules.
+type ProcessProfile struct {
+	Process      string   `yaml:"process"`
+	AllowedHosts []string `yaml:"allowed_hosts"`
+	AllowedIPs   []string `yaml:"allowed_ips"`
 }
 
 // CLIFlags represents the values from cobra command flags.

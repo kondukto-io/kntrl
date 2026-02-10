@@ -27,4 +27,13 @@ type Data struct {
 	AllowedIPv6s []net.IP `json:"allowed_ipv6s,omitempty"`
 	// AllowedDNSServers are the allowed DNS server IPs.
 	AllowedDNSServers []net.IP `json:"allowed_dns_servers,omitempty"`
+	// ProcessProfiles are per-process network access profiles.
+	ProcessProfiles []ProcessProfileData `json:"process_profiles,omitempty"`
+}
+
+// ProcessProfileData represents a per-process network access profile for OPA.
+type ProcessProfileData struct {
+	Process      string   `json:"process"`
+	AllowedHosts []string `json:"allowed_hosts"`
+	AllowedCIDRs []string `json:"allowed_cidrs,omitempty"`
 }

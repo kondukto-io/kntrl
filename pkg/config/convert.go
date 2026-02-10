@@ -103,6 +103,22 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 		}
 	}
 
+	// Convert per-process profiles
+	var processProfiles []domain.ProcessProfileData
+	for _, p := range cfg.Rules.Network.Profiles {
+		profile := domain.ProcessProfileData{
+			Process:      p.Process,
+			AllowedHosts: p.AllowedHosts,
+		}
+		for _, ipStr := range p.AllowedIPs {
+			ipStr = strings.TrimSpace(ipStr)
+			if strings.Contains(ipStr, "/") {
+				profile.AllowedCIDRs = append(profile.AllowedCIDRs, ipStr)
+			}
+		}
+		processProfiles = append(processProfiles, profile)
+	}
+
 	data := &domain.Data{
 		AllowedHosts:       dedup(hosts),
 		AllowedIPs:         ips,
@@ -113,6 +129,7 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 		AllowMetadata:      allowMetadata,
 		AllowedIPv6s:       ipv6s,
 		AllowedDNSServers:  allowedDNSServers,
+		ProcessProfiles:    processProfiles,
 	}
 
 	dataBytes, err := json.Marshal(data)

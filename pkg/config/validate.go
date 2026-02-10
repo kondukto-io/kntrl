@@ -46,6 +46,12 @@ func Validate(cfg *PolicyConfig) error {
 		}
 	}
 
+	for _, profile := range cfg.Rules.Network.Profiles {
+		if strings.TrimSpace(profile.Process) == "" {
+			return fmt.Errorf("empty process name in network profiles")
+		}
+	}
+
 	for _, server := range cfg.Rules.DNS.AllowedServers {
 		server = strings.TrimSpace(server)
 		if server == "" {
