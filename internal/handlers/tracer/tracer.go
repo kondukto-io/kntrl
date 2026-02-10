@@ -40,6 +40,13 @@ const (
 	progName   = "kntrl"
 )
 
+// tracePointAttach maps eBPF program names to their tracepoint group/name pairs.
+var tracePointAttach = map[string][2]string{
+	"inet_sock_set_state": {"sock", "inet_sock_set_state"},
+	"trace_exec":          {"sched", "sched_process_exec"},
+	"trace_fork":          {"sched", "sched_process_fork"},
+}
+
 func init() {
 	if !utils.IsRoot() {
 		logger.Log.Error("you need root privileges to run this program")
@@ -159,6 +166,32 @@ func Run(cmd cobra.Command) error {
 
 	defer ipV4Events.Close()
 
+	// Process monitoring setup
+	monitorProcesses := true
+	if cfg, ok := getProcessConfig(&cmd); ok {
+		monitorProcesses = cfg
+	}
+
+	var processEvents *ringbuf.Reader
+	if monitorProcesses {
+		processMonitorMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapProcessMonitor]
+		if processMonitorMap != nil {
+			if err := processMonitorMap.Put(uint32(0), uint32(1)); err != nil {
+				logger.Log.Warnf("failed to enable process monitor: %v", err)
+			}
+		}
+
+		processEventMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapProcessEvents]
+		if processEventMap != nil {
+			processEvents, err = ringbuf.NewReader(processEventMap)
+			if err != nil {
+				logger.Log.Warnf("failed to create ringbuf reader for process events: %v", err)
+			} else {
+				defer processEvents.Close()
+			}
+		}
+	}
+
 	// Remove memory lock restrictions for eBPF programs
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return err
@@ -194,7 +227,12 @@ func Run(cmd cobra.Command) error {
 
 		case ebpf.TracePoint:
 			logger.Log.Infof("linking tracepoint [%s]", utils.ParseProgramName(prg))
-			l, err := link.Tracepoint("sock", "inet_sock_set_state", prg, nil)
+			tp, ok := tracePointAttach[name]
+			if !ok {
+				logger.Log.Warnf("unknown tracepoint program: %s", name)
+				continue
+			}
+			l, err := link.Tracepoint(tp[0], tp[1], prg, nil)
 			if err != nil {
 				return err
 			}
@@ -232,7 +270,12 @@ func Run(cmd cobra.Command) error {
 		done <- true
 
 		if err := ipV4Events.Close(); err != nil {
-			logger.Log.Warnf("closing ringbuf reader: %s", err)
+			logger.Log.Warnf("closing ipv4 ringbuf reader: %s", err)
+		}
+		if processEvents != nil {
+			if err := processEvents.Close(); err != nil {
+				logger.Log.Warnf("closing process ringbuf reader: %s", err)
+			}
 		}
 	}()
 
@@ -241,6 +284,46 @@ func Run(cmd cobra.Command) error {
 	report := reporter.NewReporter(outputDir)
 	if report.Err != nil {
 		logger.Log.Fatalf("failed to create reporter: %s", report.Err)
+	}
+
+	// Process event goroutine
+	if processEvents != nil {
+		go func() {
+			for {
+				record, err := processEvents.Read()
+				if err != nil {
+					if errors.Is(err, ringbuf.ErrClosed) {
+						return
+					}
+					logger.Log.Errorf("failed to read process ringbuf event: %v", err)
+					continue
+				}
+
+				var event domain.ProcessEvent
+				if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
+					logger.Log.Debugf("failed to parse process event: %v", err)
+					continue
+				}
+
+				eventTypeStr := "fork"
+				if event.EventType == domain.ProcessEventTypeExec {
+					eventTypeStr = "exec"
+				}
+
+				reportEvent := domain.ProcessReportEvent{
+					ProcessID:   event.Pid,
+					ParentPID:   event.PPid,
+					EventType:   eventTypeStr,
+					Comm:        utils.TrimNullBytes(event.Comm),
+					Filename:    trimNullBytesLong(event.Filename[:]),
+					TimestampUs: event.TsUs,
+				}
+
+				report.WriteProcessEvent(reportEvent)
+				logger.Log.Infof("[process] %s pid=%d ppid=%d comm=%s file=%s",
+					eventTypeStr, event.Pid, event.PPid, reportEvent.Comm, reportEvent.Filename)
+			}
+		}()
 	}
 
 	// Event processing loop
@@ -324,6 +407,7 @@ func Run(cmd cobra.Command) error {
 EXIT:
 	<-done
 	report.PrintReportTable()
+	report.PrintProcessTable()
 	report.Close()
 	return nil
 }
@@ -377,6 +461,23 @@ func updateAllowedHostMap(allowedHostMap *ebpf.Map, arg *domain.Data) error {
 		}
 	}
 	return nil
+}
+
+func getProcessConfig(cmd *cobra.Command) (bool, bool) {
+	monitorProcesses, err := cmd.Flags().GetBool("monitor-processes")
+	if err != nil {
+		return true, false // default to enabled
+	}
+	return monitorProcesses, true
+}
+
+func trimNullBytesLong(p []byte) string {
+	for i, v := range p {
+		if v == 0 {
+			return string(p[:i])
+		}
+	}
+	return string(p)
 }
 
 func parseFlags(cmd *cobra.Command) (*domain.Data, error) {

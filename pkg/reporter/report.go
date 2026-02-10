@@ -24,6 +24,7 @@ const defaultFile = "/tmp/kntrl.out"
 type Reporter struct {
 	events         []domain.ReportEvent
 	eventsHashMap  map[string]bool
+	processEvents  []domain.ProcessReportEvent
 	Err            error
 	outputFileName string
 	file           *os.File
@@ -111,6 +112,21 @@ func (r *Reporter) WriteEvent(event domain.ReportEvent) {
 	}
 }
 
+// WriteProcessEvent adds a process event to the report
+func (r *Reporter) WriteProcessEvent(event domain.ProcessReportEvent) {
+	r.processEvents = append(r.processEvents, event)
+
+	eventData, err := json.Marshal(event)
+	if err != nil {
+		log.Fatalf("failed to marshal process event: %v", err)
+	}
+
+	_, err = r.file.WriteString(string(eventData) + "\n")
+	if err != nil {
+		log.Fatalf("failed to write process event to file: %s %v", r.file.Name(), err)
+	}
+}
+
 // Close closes the report file
 func (r *Reporter) Close() {
 	if err := r.file.Close(); err != nil {
@@ -152,6 +168,30 @@ func (r *Reporter) PrintReportTable() {
 		res = append(res, v.Domains...)
 		res = append(res, fmt.Sprintf("%s:%d", v.DestinationAddress, v.DestinationPort))
 		res = append(res, v.Policy)
+		data = append(data, res)
+	}
+
+	pterm.DefaultTable.WithHasHeader().WithRowSeparator("-").WithHeaderRowSeparator("-").WithData(data).Render()
+}
+
+func (r *Reporter) PrintProcessTable() {
+	if len(r.processEvents) == 0 {
+		return
+	}
+
+	fmt.Print("\n\n")
+	data := pterm.TableData{
+		{"Pid", "PPid", "Type", "Comm", "Filename"},
+	}
+
+	for _, v := range r.processEvents {
+		res := []string{
+			strconv.FormatUint(uint64(v.ProcessID), 10),
+			strconv.FormatUint(uint64(v.ParentPID), 10),
+			v.EventType,
+			v.Comm,
+			v.Filename,
+		}
 		data = append(data, res)
 	}
 

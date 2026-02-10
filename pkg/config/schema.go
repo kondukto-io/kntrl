@@ -10,6 +10,12 @@ type PolicyConfig struct {
 // RulesConfig contains all rule categories.
 type RulesConfig struct {
 	Network NetworkRules `yaml:"network"`
+	Process ProcessRules `yaml:"process"`
+}
+
+// ProcessRules contains process monitoring policy rules.
+type ProcessRules struct {
+	Enabled *bool `yaml:"enabled"` // default true
 }
 
 // NetworkRules contains network-related policy rules.

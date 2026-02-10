@@ -59,6 +59,33 @@ struct {
 } ipv4_events SEC(".maps");
 
 /* ========================
+ * Process Monitoring
+ * ======================== */
+
+struct process_event_t {
+	u64 ts_us;
+	u32 pid;
+	u32 ppid;
+	u8  event_type;  /* EVENT_TYPE_FORK or EVENT_TYPE_EXEC */
+	char comm[TASK_COMM_LEN];
+	char filename[MAX_FILENAME_LEN]; /* exec only */
+} __attribute__((packed));
+
+/* Ring buffer for process events */
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 128 * 1024); /* 128 KB */
+} process_events SEC(".maps");
+
+/* Enable/disable flag for process monitoring */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, __u32);
+	__type(value, __u32);
+	__uint(max_entries, 1);
+} process_monitor_map SEC(".maps");
+
+/* ========================
  * Helper Functions
  * ======================== */
 
@@ -299,6 +326,62 @@ int inet_sock_set_state(void *ctx) {
 		bpf_map_update_elem(&allowed_ip_map, &daddr, &val, BPF_ANY);
 	}
 
+	return 0;
+}
+
+/* ========================
+ * Process Monitoring Programs
+ * ======================== */
+
+SEC("tracepoint/sched/sched_process_exec")
+int trace_exec(struct trace_event_raw_sched_process_exec *ctx) {
+	__u32 key = 0;
+	__u32 *enabled = bpf_map_lookup_elem(&process_monitor_map, &key);
+	if (!enabled || *enabled == 0)
+		return 0;
+
+	struct process_event_t *evt;
+	evt = bpf_ringbuf_reserve(&process_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	evt->ts_us = bpf_ktime_get_ns() / 1000;
+	evt->pid = bpf_get_current_pid_tgid() >> 32;
+
+	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+	evt->ppid = BPF_CORE_READ(task, real_parent, tgid);
+
+	evt->event_type = EVENT_TYPE_EXEC;
+	bpf_get_current_comm(&evt->comm, TASK_COMM_LEN);
+
+	unsigned int fname_off = BPF_CORE_READ(ctx, __data_loc_filename) & 0xFFFF;
+	bpf_probe_read_str(&evt->filename, MAX_FILENAME_LEN, (void *)ctx + fname_off);
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/sched/sched_process_fork")
+int trace_fork(struct trace_event_raw_sched_process_fork *ctx) {
+	__u32 key = 0;
+	__u32 *enabled = bpf_map_lookup_elem(&process_monitor_map, &key);
+	if (!enabled || *enabled == 0)
+		return 0;
+
+	struct process_event_t *evt;
+	evt = bpf_ringbuf_reserve(&process_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	evt->ts_us = bpf_ktime_get_ns() / 1000;
+	evt->pid = BPF_CORE_READ(ctx, child_pid);
+	evt->ppid = BPF_CORE_READ(ctx, parent_pid);
+	evt->event_type = EVENT_TYPE_FORK;
+
+	bpf_probe_read_str(&evt->comm, TASK_COMM_LEN, ctx->child_comm);
+	__builtin_memset(&evt->filename, 0, MAX_FILENAME_LEN);
+
+	bpf_ringbuf_submit(evt, 0);
 	return 0;
 }
 
