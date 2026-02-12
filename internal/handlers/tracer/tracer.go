@@ -529,9 +529,14 @@ func Run(cmd cobra.Command) error {
 					continue
 				}
 
+				comm := utils.TrimNullBytes(event.Comm)
+				if comm == progName {
+					continue
+				}
+
 				reportEvent := domain.FileReportEvent{
 					ProcessID:   event.Pid,
-					Comm:        utils.TrimNullBytes(event.Comm),
+					Comm:        comm,
 					Filename:    trimNullBytesLong(event.Filename[:]),
 					Flags:       event.Flags,
 					TimestampUs: event.TsUs,
@@ -570,6 +575,11 @@ func Run(cmd cobra.Command) error {
 					QueryType:   event.Qtype,
 					IsResponse:  event.IsResponse == 1,
 					TimestampUs: event.TsUs,
+				}
+
+				// Cache IP→domain mapping from DNS responses for connection event display
+				if reportEvent.IsResponse && reportEvent.QueryDomain != "" {
+					go utils.CacheDNSDomain(reportEvent.QueryDomain)
 				}
 
 				report.WriteDNSEvent(reportEvent)

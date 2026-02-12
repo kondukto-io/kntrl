@@ -22,14 +22,65 @@ type dnsCacheEntry struct {
 var (
 	dnsCache   = make(map[string]dnsCacheEntry)
 	dnsCacheMu sync.RWMutex
+
+	// Forward DNS cache: IP string → domain name (populated from BPF DNS events)
+	fwdDNSCache   = make(map[string]dnsCacheEntry)
+	fwdDNSCacheMu sync.RWMutex
 )
 
+// CacheDNSDomain resolves a domain name and caches IP → domain mappings.
+// Called when a DNS response event is observed from BPF.
+func CacheDNSDomain(domain string) {
+	ctx, cancel := context.WithTimeout(context.Background(), dnsLookupTimeout)
+	defer cancel()
+
+	ips, err := net.DefaultResolver.LookupHost(ctx, domain)
+	if err != nil {
+		return
+	}
+
+	fwdDNSCacheMu.Lock()
+	defer fwdDNSCacheMu.Unlock()
+	for _, ipStr := range ips {
+		entry, ok := fwdDNSCache[ipStr]
+		if ok && time.Now().Before(entry.expiresAt) {
+			// Append domain if not already present
+			found := false
+			for _, n := range entry.names {
+				if n == domain {
+					found = true
+					break
+				}
+			}
+			if !found {
+				entry.names = append(entry.names, domain)
+				entry.expiresAt = time.Now().Add(dnsCacheTTL)
+				fwdDNSCache[ipStr] = entry
+			}
+		} else {
+			fwdDNSCache[ipStr] = dnsCacheEntry{
+				names:     []string{domain},
+				expiresAt: time.Now().Add(dnsCacheTTL),
+			}
+		}
+	}
+}
+
 // LookupAndTrimCached performs a cached, timeout-bounded reverse DNS lookup.
-// Results are cached for 5 minutes. Lookups that exceed 150ms are abandoned.
+// It first checks the forward DNS cache (populated from BPF DNS events),
+// then falls back to reverse DNS. Results are cached for 5 minutes.
 func LookupAndTrimCached(ip net.IP) ([]string, error) {
 	key := ip.String()
 
-	// Check cache
+	// Check forward DNS cache first (from observed DNS responses)
+	fwdDNSCacheMu.RLock()
+	fwdEntry, ok := fwdDNSCache[key]
+	fwdDNSCacheMu.RUnlock()
+	if ok && time.Now().Before(fwdEntry.expiresAt) {
+		return fwdEntry.names, nil
+	}
+
+	// Check reverse DNS cache
 	dnsCacheMu.RLock()
 	entry, ok := dnsCache[key]
 	dnsCacheMu.RUnlock()

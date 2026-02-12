@@ -258,19 +258,36 @@ func (r *Reporter) PrintDNSTable() {
 		return
 	}
 
-	fmt.Print("\n\n")
-	data := pterm.TableData{
-		{"Pid", "DNS Server", "Query Domain", "Type"},
+	// Deduplicate: collect unique domains and their DNS servers
+	type dnsEntry struct {
+		domain string
+		server string
 	}
+	seen := make(map[dnsEntry]bool)
+	var unique []dnsEntry
 
 	for _, v := range r.dnsEvents {
-		res := []string{
-			strconv.FormatUint(uint64(v.ProcessID), 10),
-			v.DNSServer,
-			v.QueryDomain,
-			strconv.FormatUint(uint64(v.QueryType), 10),
+		if v.QueryDomain == "" {
+			continue
 		}
-		data = append(data, res)
+		e := dnsEntry{domain: v.QueryDomain, server: v.DNSServer}
+		if !seen[e] {
+			seen[e] = true
+			unique = append(unique, e)
+		}
+	}
+
+	if len(unique) == 0 {
+		return
+	}
+
+	fmt.Print("\n\n")
+	data := pterm.TableData{
+		{"Domain", "DNS Server"},
+	}
+
+	for _, e := range unique {
+		data = append(data, []string{e.domain, e.server})
 	}
 
 	pterm.DefaultTable.WithHasHeader().WithRowSeparator("-").WithHeaderRowSeparator("-").WithData(data).Render()
