@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -552,6 +553,10 @@ func Run(cmd cobra.Command) error {
 	// DNS event goroutine
 	if dnsEvents != nil {
 		go func() {
+			// Dedup: skip repeated events for the same domain within a short window
+			dnsDedup := make(map[string]time.Time)
+			const dnsDedupTTL = 2 * time.Second
+
 			for {
 				record, err := dnsEvents.Read()
 				if err != nil {
@@ -578,6 +583,18 @@ func Run(cmd cobra.Command) error {
 					continue
 				}
 
+				// Deduplicate: skip if same domain+direction was seen recently
+				now := time.Now()
+				isResp := event.IsResponse == 1
+				dedupKey := qname + "|q"
+				if isResp {
+					dedupKey = qname + "|r"
+				}
+				if lastSeen, ok := dnsDedup[dedupKey]; ok && now.Sub(lastSeen) < dnsDedupTTL {
+					continue
+				}
+				dnsDedup[dedupKey] = now
+
 				reportEvent := domain.DNSReportEvent{
 					ProcessID:   event.Pid,
 					DNSServer:   utils.IntToIP(event.DNSServerIP).String(),
@@ -587,9 +604,9 @@ func Run(cmd cobra.Command) error {
 					TimestampUs: event.TsUs,
 				}
 
-				// Cache IP→domain mapping from DNS responses for connection event display
+				// Cache IP→domain mapping synchronously so it's ready before connection events
 				if reportEvent.IsResponse && reportEvent.QueryDomain != "" {
-					go utils.CacheDNSDomain(reportEvent.QueryDomain)
+					utils.CacheDNSDomain(reportEvent.QueryDomain)
 				}
 
 				report.WriteDNSEvent(reportEvent)

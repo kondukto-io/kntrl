@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/pterm/pterm"
@@ -211,13 +212,18 @@ func (r *Reporter) PrintReportTable() {
 	}
 
 	for _, v := range r.events {
-		res := make([]string, 0)
-		res = append(res, strconv.FormatUint(uint64(v.ProcessID), 10))
-		res = append(res, v.TaskName)
-		res = append(res, v.Protocol)
-		res = append(res, v.Domains...)
-		res = append(res, fmt.Sprintf("%s:%d", v.DestinationAddress, v.DestinationPort))
-		res = append(res, v.Policy)
+		domain := strings.Join(v.Domains, ", ")
+		if domain == "" {
+			domain = "."
+		}
+		res := []string{
+			strconv.FormatUint(uint64(v.ProcessID), 10),
+			v.TaskName,
+			v.Protocol,
+			domain,
+			fmt.Sprintf("%s:%d", v.DestinationAddress, v.DestinationPort),
+			v.Policy,
+		}
 		data = append(data, res)
 	}
 
