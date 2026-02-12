@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"syscall"
 
@@ -565,7 +566,7 @@ func Run(cmd cobra.Command) error {
 				reportEvent := domain.DNSReportEvent{
 					ProcessID:   event.Pid,
 					DNSServer:   utils.IntToIP(event.DNSServerIP).String(),
-					QueryDomain: trimNullBytesLong(event.Qname[:]),
+					QueryDomain: strings.TrimPrefix(trimNullBytesLong(event.Qname[:]), "."),
 					QueryType:   event.Qtype,
 					IsResponse:  event.IsResponse == 1,
 					TimestampUs: event.TsUs,
