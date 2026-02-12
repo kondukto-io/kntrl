@@ -568,10 +568,20 @@ func Run(cmd cobra.Command) error {
 					continue
 				}
 
+				qname := strings.TrimPrefix(trimNullBytesLong(event.Qname[:]), ".")
+
+				// Skip reverse DNS and internal lookups — only forward queries matter for security
+				if strings.Contains(qname, "in-addr.arpa") ||
+					strings.Contains(qname, "ip6.arpa") ||
+					strings.HasSuffix(qname, ".internal") ||
+					qname == "" {
+					continue
+				}
+
 				reportEvent := domain.DNSReportEvent{
 					ProcessID:   event.Pid,
 					DNSServer:   utils.IntToIP(event.DNSServerIP).String(),
-					QueryDomain: strings.TrimPrefix(trimNullBytesLong(event.Qname[:]), "."),
+					QueryDomain: qname,
 					QueryType:   event.Qtype,
 					IsResponse:  event.IsResponse == 1,
 					TimestampUs: event.TsUs,
@@ -684,6 +694,11 @@ func Run(cmd cobra.Command) error {
 		if err != nil {
 			logger.Log.Debugf("failed to lookup domain: [%s] %v", domainAddress.String(), err)
 			domainNames = append(domainNames, ".")
+		}
+
+		// Skip DNS traffic (port 53) — already captured by DNS monitor
+		if event.Dport == 53 {
+			continue
 		}
 
 		// Evaluate policy
