@@ -26,14 +26,14 @@ COPY . .
 # Download GitHub meta for OPA bundle
 RUN wget -q --timeout=30 --tries=3 https://api.github.com/meta -O ./bundle/assets/github/data.json || true
 
-# Run go generate to compile eBPF C code
+# Compile eBPF C code for x86_64.
 ENV BPF_CLANG=clang-16
 ENV BPF_CFLAGS="-O2 -g -Wall -Werror"
 ENV BPF_HEADERS=/src/bpf/headers
-RUN go generate ./...
+RUN GOARCH=amd64 go generate ./...
 
-# Build the binary
-RUN go build -o /src/kntrl .
+# Build the binary for x86_64 Linux
+RUN CGO_ENABLED=0 GOARCH=amd64 go build -o /src/kntrl .
 
 # Stage 2: Test runner
 FROM builder AS test-runner

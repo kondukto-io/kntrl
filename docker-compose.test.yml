@@ -76,6 +76,37 @@ services:
       - NET_ADMIN
       - SYS_PTRACE
 
+  # Interactive runtime test - run kntrl with a policy and exec into container
+  # Usage:
+  #   docker compose -f docker-compose.test.yml run --rm runtime
+  #   Then in another terminal:
+  #     docker exec -it <container-id> bash
+  #     curl https://github.com          # should be allowed (direct)
+  #     sh -c "curl https://github.com"  # should be BLOCKED (curl from sh)
+  #     sh -c "wget https://github.com"  # should be BLOCKED (wget from sh)
+  runtime:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: test-runner
+    entrypoint: []
+    command: ["/src/kntrl", "start", "--mode=trace", "--rules-file=/src/examples/runtime-test.yaml", "-v"]
+    privileged: true
+    pid: host
+    network_mode: host
+    volumes:
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - /sys/fs/bpf:/sys/fs/bpf:rw
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - SYS_PTRACE
+    stdin_open: true
+    tty: true
+
   # All tests combined
   test-all:
     platform: linux/amd64

@@ -4,11 +4,23 @@ GOARCH ?= amd64
 
 LIBEBPF_TOP = ${PWD}
 HEADERS = $(LIBEBPF_TOP)/bpf/headers
+BUILD_DIR = build
+
+# Detect host architecture for cross-compilation
+HOST_UNAME := $(shell uname -m)
+ifeq ($(HOST_UNAME),arm64)
+  TARGET_GOARCH ?= arm64
+else ifeq ($(HOST_UNAME),aarch64)
+  TARGET_GOARCH ?= arm64
+else
+  TARGET_GOARCH ?= amd64
+endif
 
 DOCKER_COMPOSE_TEST = docker compose -f docker-compose.test.yml
 
 .PHONY: all generate build clean \
-	docker-build-test test-unit test-rego test-ebpf test-integration test-all \
+	docker-build docker-build-test \
+	test-unit test-rego test-ebpf test-integration test-all \
 	test-unit-local test-rego-local test-clean
 
 # =====================
@@ -29,11 +41,32 @@ build:
 	@echo "Download the github metadata to the OPA bundle..."
 	wget -q --timeout=30 --tries=3 https://api.github.com/meta -O ./bundle/assets/github/data.json
 
+	@mkdir -p $(BUILD_DIR)
 	@echo "Building the project..."
-	go build -o kntrl .
+	go build -o $(BUILD_DIR)/kntrl .
 
 clean:
-	rm -f kntrl ./internal/handlers/tracer/bpf_bpfel_x86.o ./internal/handlers/tracer/bpf_bpfel_x86.go
+	rm -rf $(BUILD_DIR)
+	rm -f ./internal/handlers/tracer/bpf_bpfel_x86.o ./internal/handlers/tracer/bpf_bpfel_x86.go
+
+# =====================
+# Docker Build
+# =====================
+
+# Build kntrl binary inside Docker for the host architecture.
+# Generates BPF for both x86 and arm64, then cross-compiles for TARGET_GOARCH.
+# Override with: make docker-build TARGET_GOARCH=amd64
+docker-build:
+	@mkdir -p $(BUILD_DIR)
+	DOCKER_DEFAULT_PLATFORM=linux/amd64 docker build \
+		--build-arg TARGETARCH=$(TARGET_GOARCH) \
+		-f Dockerfile.test \
+		--target builder \
+		-t kntrl-builder .
+	@container=$$(docker create kntrl-builder) && \
+		docker cp $$container:/src/kntrl $(BUILD_DIR)/kntrl && \
+		docker rm $$container > /dev/null
+	@echo "Binary written to $(BUILD_DIR)/kntrl ($(TARGET_GOARCH))"
 
 # =====================
 # Docker Test Targets

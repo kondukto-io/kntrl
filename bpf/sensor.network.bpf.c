@@ -1,8 +1,9 @@
 //go:build ignore
 
 #include "headers/vmlinux.h"
-#include <asm-generic/errno-base.h>
-#include <stdbool.h>
+/* vmlinux.h provides bool (_Bool) and all kernel types.
+ * Do NOT include libc headers (stdbool.h, string.h, errno.h, etc.)
+ * — they pull in arch-specific paths that break -target bpf builds. */
 
 #include "headers/bpf_helpers.h"
 #include "headers/bpf_core_read.h"
@@ -307,7 +308,7 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 				dns_evt->ts_us = bpf_ktime_get_ns() / 1000;
 				dns_evt->pid = bpf_get_current_pid_tgid() >> 32;
 				dns_evt->dns_server_ip = iph.saddr;
-				__builtin_memcpy(&dns_evt->qname, buff, MAX_HOSTNAME_LEN);
+				bpf_probe_read_kernel(&dns_evt->qname, MAX_HOSTNAME_LEN, buff);
 				dns_evt->qtype = 0;
 				dns_evt->is_response = 1;
 				bpf_ringbuf_submit(dns_evt, 0);
@@ -357,7 +358,7 @@ int kprobe__skb_consume_udp(struct pt_regs *ctx) {
 				dns_evt->ts_us = bpf_ktime_get_ns() / 1000;
 				dns_evt->pid = bpf_get_current_pid_tgid() >> 32;
 				dns_evt->dns_server_ip = iph.daddr;
-				__builtin_memcpy(&dns_evt->qname, buff, MAX_HOSTNAME_LEN);
+				bpf_probe_read_kernel(&dns_evt->qname, MAX_HOSTNAME_LEN, buff);
 				dns_evt->qtype = 0;
 				dns_evt->is_response = 0;
 				bpf_ringbuf_submit(dns_evt, 0);
@@ -556,7 +557,7 @@ int trace_fork(struct trace_event_raw_sched_process_fork *ctx) {
 	evt->event_type = EVENT_TYPE_FORK;
 
 	bpf_probe_read_str(&evt->comm, TASK_COMM_LEN, ctx->child_comm);
-	__builtin_memset(&evt->filename, 0, MAX_FILENAME_LEN);
+	evt->filename[0] = '\0';
 
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
@@ -737,21 +738,24 @@ static __always_inline void try_extract_sni(struct __sk_buff *skb, struct iphdr 
 			if (name_len == 0 || name_len >= MAX_HOSTNAME_LEN)
 				break;
 
+			/* Use stack buffer for variable ops — the verifier
+			 * forbids variable-index writes on ringbuf memory. */
+			char sni_buf[MAX_HOSTNAME_LEN];
+			__builtin_memset(sni_buf, 0, sizeof(sni_buf));
+			if (bpf_skb_load_bytes(skb, pos + 5, sni_buf, MAX_HOSTNAME_LEN - 1) < 0)
+				break;
+			sni_buf[name_len & 0xFF] = '\0';
+
 			struct sni_event_t *evt;
 			evt = bpf_ringbuf_reserve(&sni_events, sizeof(*evt), 0);
 			if (!evt)
 				break;
 
 			evt->ts_us = bpf_ktime_get_ns() / 1000;
-			evt->pid = bpf_get_current_pid_tgid() >> 32;
+			evt->pid = 0;
 			evt->daddr = iph->daddr;
 			evt->dport = bpf_ntohs(tcph.dest);
-			__builtin_memset(evt->sni, 0, MAX_HOSTNAME_LEN);
-
-			u16 read_len = name_len;
-			if (read_len > MAX_HOSTNAME_LEN - 1)
-				read_len = MAX_HOSTNAME_LEN - 1;
-			bpf_skb_load_bytes(skb, pos + 5, evt->sni, read_len);
+			__builtin_memcpy(evt->sni, sni_buf, MAX_HOSTNAME_LEN);
 
 			bpf_ringbuf_submit(evt, 0);
 			break;
@@ -761,7 +765,7 @@ static __always_inline void try_extract_sni(struct __sk_buff *skb, struct iphdr 
 	}
 }
 
-inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
+static __always_inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 	bool block = true;
 
 	struct iphdr iph;

@@ -803,9 +803,10 @@ func updateAllowedIPv6Maps(allowedIPv6Map *ebpf.Map, arg *domain.Data) error {
 }
 
 func updateAllowedHostMap(allowedHostMap *ebpf.Map, arg *domain.Data) error {
-	for _, hosts := range arg.AllowedHosts {
-		h := binary.LittleEndian.Uint32([]byte(hosts + "\x00"))
-		if err := allowedHostMap.Put(h, uint32(1)); err != nil {
+	for _, host := range arg.AllowedHosts {
+		var key [256]byte
+		copy(key[:], host)
+		if err := allowedHostMap.Put(key, uint32(1)); err != nil {
 			return err
 		}
 	}

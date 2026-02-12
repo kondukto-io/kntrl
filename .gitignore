@@ -5,6 +5,7 @@
 internal/**/*.o
 internal/**/*x86.go
 /kntrl
+/build/
 
 dist/
 \.idea/
