@@ -1,6 +1,7 @@
 package tracer
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	_ "embed"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -293,6 +295,17 @@ func Run(cmd cobra.Command) error {
 		}
 	}
 
+	// Populate self TGID so BPF programs can drop kntrl's own events
+	selfTGIDMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapSelfTGID]
+	if selfTGIDMap != nil {
+		if err := selfTGIDMap.Put(uint32(0), uint32(os.Getpid())); err != nil {
+			logger.Log.Warnf("failed to set self TGID: %v", err)
+		}
+	}
+
+	// Preload established TCP connections so existing sessions (e.g. SSH) survive BPF attach
+	preloadEstablishedConns(allowedIPMap, allowedIPv6Map)
+
 	// Remove memory lock restrictions for eBPF programs
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return err
@@ -432,6 +445,7 @@ func Run(cmd cobra.Command) error {
 	if report.Err != nil {
 		logger.Log.Fatalf("failed to create reporter: %s", report.Err)
 	}
+	report.SetSelfPID(uint32(os.Getpid()))
 
 	procTree := proctree.New()
 
@@ -459,20 +473,30 @@ func Run(cmd cobra.Command) error {
 					eventTypeStr = "exec"
 				}
 
+				// Convert NUL-separated argv to space-separated string.
+				// Use ArgsLen from BPF to exclude environment variables.
+				argEnd := int(event.ArgsLen)
+				if argEnd > len(event.Args) {
+					argEnd = len(event.Args)
+				}
+				argsBytes := bytes.TrimRight(event.Args[:argEnd], "\x00")
+				argsStr := strings.ReplaceAll(string(argsBytes), "\x00", " ")
+
 				reportEvent := domain.ProcessReportEvent{
 					ProcessID:   event.Pid,
 					ParentPID:   event.PPid,
 					EventType:   eventTypeStr,
 					Comm:        utils.TrimNullBytes(event.Comm),
 					Filename:    trimNullBytesLong(event.Filename[:]),
+					Args:        argsStr,
 					TimestampUs: event.TsUs,
 				}
 
 				procTree.Update(event.Pid, event.PPid, reportEvent.Comm)
 
 				report.WriteProcessEvent(reportEvent)
-				logger.Log.Infof("[process] %s pid=%d ppid=%d comm=%s file=%s",
-					eventTypeStr, event.Pid, event.PPid, reportEvent.Comm, reportEvent.Filename)
+				logger.Log.Infof("[process] %s pid=%d ppid=%d comm=%s file=%s args=%q",
+					eventTypeStr, event.Pid, event.PPid, reportEvent.Comm, reportEvent.Filename, reportEvent.Args)
 			}
 		}()
 	}
@@ -784,9 +808,11 @@ func Run(cmd cobra.Command) error {
 
 EXIT:
 	<-done
+	prettyOutput, _ := cmd.Flags().GetBool("pretty")
+
 	report.PrintReportTable()
 	report.PrintDNSTable()
-	report.PrintProcessTable()
+	report.PrintProcessTable(prettyOutput)
 	report.PrintFileTable()
 	report.Close()
 	return nil
@@ -893,6 +919,127 @@ func trimNullBytesLong(p []byte) string {
 		}
 	}
 	return string(p)
+}
+
+// preloadEstablishedConns reads /proc/net/tcp and /proc/net/tcp6 to discover
+// ESTABLISHED connections and pre-populates the BPF allowed IP maps so that
+// existing sessions (e.g. SSH) are not dropped when the egress filter attaches.
+func preloadEstablishedConns(allowedIPMap, allowedIPv6Map *ebpf.Map) {
+	v4 := preloadTCP4(allowedIPMap)
+	var v6 int
+	if allowedIPv6Map != nil {
+		v6 = preloadTCP6(allowedIPv6Map)
+	}
+	if v4+v6 > 0 {
+		logger.Log.Infof("preloaded %d established connections (IPv4=%d, IPv6=%d)", v4+v6, v4, v6)
+	}
+}
+
+// preloadTCP4 parses /proc/net/tcp for ESTABLISHED (state 01) connections and
+// adds their remote IPv4 addresses to the BPF allowed IP map.
+func preloadTCP4(m *ebpf.Map) int {
+	f, err := os.Open("/proc/net/tcp")
+	if err != nil {
+		logger.Log.Debugf("preloadTCP4: %v", err)
+		return 0
+	}
+	defer f.Close()
+
+	var count int
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 4 {
+			continue
+		}
+		// Field 3 is the connection state; "01" = TCP_ESTABLISHED
+		if fields[3] != "01" {
+			continue
+		}
+		// Field 2 is rem_address in hex "XXXXXXXX:PPPP"
+		parts := strings.SplitN(fields[2], ":", 2)
+		if len(parts) < 1 || len(parts[0]) != 8 {
+			continue
+		}
+		ipHex, err := strconv.ParseUint(parts[0], 16, 32)
+		if err != nil {
+			continue
+		}
+		ipUint32 := uint32(ipHex)
+		// Skip 0.0.0.0
+		if ipUint32 == 0 {
+			continue
+		}
+		if err := m.Put(ipUint32, uint32(1)); err != nil {
+			logger.Log.Debugf("preloadTCP4: put failed: %v", err)
+		} else {
+			count++
+		}
+	}
+	return count
+}
+
+// preloadTCP6 parses /proc/net/tcp6 for ESTABLISHED (state 01) connections and
+// adds their remote IPv6 addresses to the BPF allowed IPv6 map.
+func preloadTCP6(m *ebpf.Map) int {
+	f, err := os.Open("/proc/net/tcp6")
+	if err != nil {
+		logger.Log.Debugf("preloadTCP6: %v", err)
+		return 0
+	}
+	defer f.Close()
+
+	var count int
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 4 {
+			continue
+		}
+		if fields[3] != "01" {
+			continue
+		}
+		parts := strings.SplitN(fields[2], ":", 2)
+		if len(parts) < 1 || len(parts[0]) != 32 {
+			continue
+		}
+		hexStr := parts[0]
+
+		// Parse 32-char hex into [16]byte.
+		// /proc/net/tcp6 stores each 4-byte group in host (little-endian) order,
+		// so we reverse each group to get network byte order for the BPF map key.
+		var addr [16]byte
+		for i := 0; i < 4; i++ {
+			group := hexStr[i*8 : i*8+8]
+			for j := 0; j < 4; j++ {
+				b, err := strconv.ParseUint(group[j*2:j*2+2], 16, 8)
+				if err != nil {
+					break
+				}
+				// Reverse within each 4-byte group: byte 3-j maps to position i*4+j
+				addr[i*4+(3-j)] = byte(b)
+			}
+		}
+
+		// Skip all-zeros (::)
+		allZero := true
+		for _, b := range addr {
+			if b != 0 {
+				allZero = false
+				break
+			}
+		}
+		if allZero {
+			continue
+		}
+
+		if err := m.Put(addr, uint32(1)); err != nil {
+			logger.Log.Debugf("preloadTCP6: put failed: %v", err)
+		} else {
+			count++
+		}
+	}
+	return count
 }
 
 func parseFlags(cmd *cobra.Command) (*domain.Data, error) {

@@ -45,6 +45,7 @@ func initTracerCommand() *cobra.Command {
 	tracerCMD.Flags().StringP("output-file-name", "o", "/tmp/kntrl.out", "output file name")
 	tracerCMD.Flags().String("rules-file", "", "path to a YAML rules file")
 	tracerCMD.Flags().String("rules-dir", "", "path to a directory of .yaml and/or .rego rule files")
+	tracerCMD.Flags().Bool("pretty", false, "pretty-print process events as a tree")
 
 	return tracerCMD
 }

@@ -9,5 +9,7 @@
 
 #define AF_INET6 10
 
+#define MAX_ARGS_LEN 256
+
 #define EVENT_TYPE_FORK 1
 #define EVENT_TYPE_EXEC 2

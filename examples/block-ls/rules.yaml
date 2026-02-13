@@ -1,0 +1,27 @@
+version: "1"
+mode: trace
+rules:
+  network:
+    allowed_hosts:
+      # Resolve Google domains so their IPs enter the BPF allow-map at startup
+      - ".googleapis.com"
+      - ".google.com"
+      - ".googleusercontent.com"
+      - ".gstatic.com"
+    allowed_ips:
+      - "0.0.0.0/0"          # OPA: allow all new outbound connections
+      # Google IAP tunnel range (used by `gcloud compute ssh`)
+      # CIDRs feed OPA only; individual IPs feed the BPF kernel map.
+      - "35.235.240.0/20"
+      # >>> Add your SSH peer IP here (find it with: ss -tn | grep :22) <<<
+      # - "YOUR_SSH_PEER_IP"
+    allow_local_ranges: true
+    allow_metadata: true      # GCP metadata endpoint (169.254.169.254)
+  process:
+    enabled: true
+    blocked_chains:
+      # Supply-chain: block Python network access when spawned by npm
+      - process: python
+        ancestors: [npm]
+      - process: python3
+        ancestors: [npm]

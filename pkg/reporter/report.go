@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 )
 
 const defaultFile = "/tmp/kntrl.out"
+const selfBinaryName = "kntrl"
 
 // Reporter is a reporter for events
 type Reporter struct {
@@ -32,6 +34,7 @@ type Reporter struct {
 	Err            error
 	outputFileName string
 	file           *os.File
+	selfPID        uint32
 }
 
 // NewReporter returns a new reporter
@@ -55,6 +58,26 @@ func NewReporter(outputFileName string) *Reporter {
 	report.file = file
 
 	return report
+}
+
+// SetSelfPID records kntrl's own PID so its process tree can be filtered from output.
+func (r *Reporter) SetSelfPID(pid uint32) {
+	r.selfPID = pid
+}
+
+// selfPIDs returns the set of PIDs belonging to kntrl and all its descendants.
+func (r *Reporter) selfPIDs() map[uint32]bool {
+	pids := map[uint32]bool{r.selfPID: true}
+	// Events are in chronological order, so a single pass propagates correctly.
+	for _, ev := range r.processEvents {
+		if ev.Comm == selfBinaryName {
+			pids[ev.ProcessID] = true
+		}
+		if pids[ev.ParentPID] {
+			pids[ev.ProcessID] = true
+		}
+	}
+	return pids
 }
 
 func LoadAndPrint() error {
@@ -299,7 +322,7 @@ func (r *Reporter) PrintDNSTable() {
 	pterm.DefaultTable.WithHasHeader().WithRowSeparator("-").WithHeaderRowSeparator("-").WithData(data).Render()
 }
 
-func (r *Reporter) PrintProcessTable() {
+func (r *Reporter) PrintProcessTable(pretty bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -307,23 +330,148 @@ func (r *Reporter) PrintProcessTable() {
 		return
 	}
 
+	if pretty {
+		r.printProcessTree()
+	} else {
+		r.printProcessFlat()
+	}
+}
+
+func (r *Reporter) printProcessFlat() {
+	selfSet := r.selfPIDs()
+
 	fmt.Print("\n\n")
 	data := pterm.TableData{
-		{"Pid", "PPid", "Type", "Comm", "Filename"},
+		{"Pid", "PPid", "Type", "Comm", "Args"},
 	}
 
 	for _, v := range r.processEvents {
+		if selfSet[v.ProcessID] {
+			continue
+		}
 		res := []string{
 			strconv.FormatUint(uint64(v.ProcessID), 10),
 			strconv.FormatUint(uint64(v.ParentPID), 10),
 			v.EventType,
 			v.Comm,
-			v.Filename,
+			v.Args,
 		}
 		data = append(data, res)
 	}
 
 	pterm.DefaultTable.WithHasHeader().WithRowSeparator("-").WithHeaderRowSeparator("-").WithData(data).Render()
+}
+
+func (r *Reporter) printProcessTree() {
+	// Merge fork + exec events per pid.
+	// Fork provides reliable ppid (from tracepoint args).
+	// Exec provides args, filename, comm.
+	// Events can arrive in any order (exec before fork is possible).
+	type procNode struct {
+		pid     uint32
+		ppid    uint32
+		comm    string
+		args    string
+		hasFork bool
+	}
+
+	nodeMap := make(map[uint32]*procNode)
+	var order []uint32
+
+	selfSet := r.selfPIDs()
+
+	for _, ev := range r.processEvents {
+		if selfSet[ev.ProcessID] {
+			continue
+		}
+		n, exists := nodeMap[ev.ProcessID]
+		if !exists {
+			n = &procNode{pid: ev.ProcessID, ppid: ev.ParentPID, comm: ev.Comm}
+			nodeMap[ev.ProcessID] = n
+			order = append(order, ev.ProcessID)
+		}
+
+		if ev.EventType == "fork" {
+			// Fork ppid comes from tracepoint args — always reliable
+			n.ppid = ev.ParentPID
+			n.hasFork = true
+			if n.comm == "" {
+				n.comm = ev.Comm
+			}
+		} else {
+			// Exec provides display data (args, comm)
+			n.comm = ev.Comm
+			n.args = ev.Args
+			// Only use exec's ppid if we never got a fork event
+			if !n.hasFork {
+				n.ppid = ev.ParentPID
+			}
+		}
+	}
+
+	// Build children map
+	children := make(map[uint32][]uint32)
+	for _, pid := range order {
+		ppid := nodeMap[pid].ppid
+		children[ppid] = append(children[ppid], pid)
+	}
+
+	// Find roots: processes whose ppid is not in nodeMap
+	var roots []uint32
+	for _, pid := range order {
+		ppid := nodeMap[pid].ppid
+		if _, ok := nodeMap[ppid]; !ok {
+			roots = append(roots, pid)
+		}
+	}
+
+	sort.Slice(roots, func(i, j int) bool { return roots[i] < roots[j] })
+
+	fmt.Print("\n\n")
+	pterm.DefaultHeader.WithBackgroundStyle(pterm.NewStyle(pterm.BgDefault)).
+		WithTextStyle(pterm.NewStyle(pterm.FgLightCyan, pterm.Bold)).
+		Println("Process Tree")
+
+	var printTree func(pid uint32, prefix string, isLast bool)
+	printTree = func(pid uint32, prefix string, isLast bool) {
+		n := nodeMap[pid]
+
+		connector := "├── "
+		if isLast {
+			connector = "└── "
+		}
+		if prefix == "" {
+			connector = ""
+		}
+
+		display := n.args
+		if display == "" {
+			display = n.comm
+		}
+
+		fmt.Printf("%s%s[%d] %s\n", prefix, connector, n.pid, display)
+
+		kids := children[pid]
+		sort.Slice(kids, func(i, j int) bool { return kids[i] < kids[j] })
+
+		childPrefix := prefix
+		if prefix != "" {
+			if isLast {
+				childPrefix += "    "
+			} else {
+				childPrefix += "│   "
+			}
+		}
+
+		for i, child := range kids {
+			printTree(child, childPrefix, i == len(kids)-1)
+		}
+	}
+
+	for i, root := range roots {
+		printTree(root, "", i == len(roots)-1)
+	}
+	fmt.Println()
 }
 
 func hash(text string) string {

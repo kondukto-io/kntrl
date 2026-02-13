@@ -38,3 +38,6 @@ const EBPFCollectionMapFileEvents = "file_events"
 
 // EBPFCollectionMapFileMonitor is the file monitoring enable/disable flag
 const EBPFCollectionMapFileMonitor = "file_monitor_map"
+
+// EBPFCollectionMapSelfTGID holds kntrl's own TGID for BPF-level self-filtering
+const EBPFCollectionMapSelfTGID = "self_tgid_map"

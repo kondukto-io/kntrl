@@ -8,6 +8,8 @@ type ProcessEvent struct {
 	EventType uint8
 	Comm      [16]byte
 	Filename  [256]byte
+	Args      [256]byte
+	ArgsLen   uint16
 }
 
 // ProcessReportEvent is the JSON-serializable process event for reporting.
@@ -17,6 +19,7 @@ type ProcessReportEvent struct {
 	EventType   string `json:"event_type"` // "fork" or "exec"
 	Comm        string `json:"comm"`
 	Filename    string `json:"filename,omitempty"`
+	Args        string `json:"args,omitempty"`
 	TimestampUs uint64 `json:"ts_us"`
 }
 
