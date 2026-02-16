@@ -244,12 +244,33 @@ func Run(cmd cobra.Command) error {
 	// File monitoring setup
 	var fileEvents *ringbuf.Reader
 	fileMonitorEnabled := false
+	var monitoredPaths []string
+	var monitoredEnvVars []string
 	if rulesFile != "" || rulesDir != "" {
-		// Check file rules from config (default: disabled)
 		cliFlags := gatherCLIFlags(&cmd)
 		policyCfg, _, _ := config.LoadAll(rulesFile, rulesDir, cliFlags)
-		if policyCfg != nil && policyCfg.Rules.File.Enabled != nil && *policyCfg.Rules.File.Enabled {
+		if policyCfg != nil {
+			// Enabled by default when rules file exists, unless explicitly disabled
 			fileMonitorEnabled = true
+			if policyCfg.Rules.File.Enabled != nil && !*policyCfg.Rules.File.Enabled {
+				fileMonitorEnabled = false
+			}
+			monitoredPaths = policyCfg.Rules.File.MonitoredPaths
+			monitoredEnvVars = policyCfg.Rules.File.MonitoredEnvVars
+		}
+	}
+
+	if len(monitoredEnvVars) > 0 {
+		// Auto-monitor /proc/*/environ when env var monitoring is configured
+		hasEnvironPath := false
+		for _, p := range monitoredPaths {
+			if strings.Contains(p, "/environ") {
+				hasEnvironPath = true
+				break
+			}
+		}
+		if !hasEnvironPath {
+			monitoredPaths = append(monitoredPaths, "/proc/self/environ")
 		}
 	}
 
@@ -405,6 +426,7 @@ func Run(cmd cobra.Command) error {
 				}
 			}
 			policyPtr.Store(newPolicy)
+			newPolicy.FlushCache()
 			logger.Log.Info("SIGHUP: policy reloaded successfully")
 		}
 	}()
@@ -448,6 +470,9 @@ func Run(cmd cobra.Command) error {
 	report.SetSelfPID(uint32(os.Getpid()))
 
 	procTree := proctree.New()
+
+	// Start async DNS resolution worker
+	utils.StartDNSWorker()
 
 	// Process event goroutine
 	if processEvents != nil {
@@ -497,6 +522,22 @@ func Run(cmd cobra.Command) error {
 				report.WriteProcessEvent(reportEvent)
 				logger.Log.Infof("[process] %s pid=%d ppid=%d comm=%s file=%s args=%q",
 					eventTypeStr, event.Pid, event.PPid, reportEvent.Comm, reportEvent.Filename, reportEvent.Args)
+
+				// Primary env var detection: scan at exec time
+				if eventTypeStr == "exec" && len(monitoredEnvVars) > 0 {
+					if vars := utils.FindMatchingEnvVars(event.Pid, monitoredEnvVars); len(vars) > 0 {
+						report.WriteFileEvent(domain.FileReportEvent{
+							ProcessID:      event.Pid,
+							Comm:           utils.TrimNullBytes(event.Comm),
+							Filename:       "[inherited]",
+							TimestampUs:    event.TsUs,
+							Policy:         "flag",
+							MatchedEnvVars: vars,
+						})
+						logger.Log.Infof("[env] pid=%d comm=%s inherited env vars: %v",
+							event.Pid, reportEvent.Comm, vars)
+					}
+				}
 			}
 		}()
 	}
@@ -538,6 +579,7 @@ func Run(cmd cobra.Command) error {
 	// File event goroutine
 	if fileEvents != nil {
 		go func() {
+			hasPathFilter := len(monitoredPaths) > 0
 			for {
 				record, err := fileEvents.Read()
 				if err != nil {
@@ -559,17 +601,47 @@ func Run(cmd cobra.Command) error {
 					continue
 				}
 
+				filename := trimNullBytesLong(event.Filename[:])
+
+				// Path filtering: drop events not matching any monitored path
+				isEnvFile := len(monitoredEnvVars) > 0 && utils.IsEnvironFile(filename)
+				var matched bool
+				if hasPathFilter {
+					matched, _ = utils.MatchesMonitoredPath(filename, monitoredPaths)
+				}
+				if !matched && !isEnvFile {
+					continue // Drop: doesn't match any monitored path or env pattern
+				}
+
 				reportEvent := domain.FileReportEvent{
 					ProcessID:   event.Pid,
 					Comm:        comm,
-					Filename:    trimNullBytesLong(event.Filename[:]),
+					Filename:    filename,
 					Flags:       event.Flags,
 					TimestampUs: event.TsUs,
+					Policy:      "flag",
+				}
+
+				// Env var detection for /proc/*/environ accesses
+				if isEnvFile {
+					if vars := utils.FindMatchingEnvVars(event.Pid, monitoredEnvVars); len(vars) > 0 {
+						reportEvent.MatchedEnvVars = vars
+					}
 				}
 
 				report.WriteFileEvent(reportEvent)
-				logger.Log.Infof("[file] pid=%d comm=%s file=%s flags=%d",
-					event.Pid, reportEvent.Comm, reportEvent.Filename, event.Flags)
+
+				// Webhook: send flagged file events
+				if webhookClient != nil {
+					webhookClient.Send(webhook.Event{
+						Type:      "file_flag",
+						Timestamp: int64(event.TsUs),
+						Data:      reportEvent,
+					})
+				}
+
+				logger.Log.Infof("[file] pid=%d comm=%s file=%s policy=flag%s",
+					event.Pid, comm, filename, fmtEnvVars(reportEvent.MatchedEnvVars))
 			}
 		}()
 	}
@@ -630,7 +702,7 @@ func Run(cmd cobra.Command) error {
 
 				// Cache IP→domain mapping synchronously so it's ready before connection events
 				if reportEvent.IsResponse && reportEvent.QueryDomain != "" {
-					utils.CacheDNSDomain(reportEvent.QueryDomain)
+					utils.CacheDNSDomainAsync(reportEvent.QueryDomain)
 				}
 
 				report.WriteDNSEvent(reportEvent)
@@ -667,6 +739,9 @@ func Run(cmd cobra.Command) error {
 				}
 
 				taskname := utils.TrimNullBytes(event.Task)
+				if exeName := utils.ResolveCommFromExe(event.Pid); exeName != "" {
+					taskname = exeName
+				}
 				if taskname == progName {
 					continue
 				}
@@ -686,7 +761,7 @@ func Run(cmd cobra.Command) error {
 				}
 
 				if tracerMode != domain.TracerModeMonitor {
-					result, err := policyPtr.Load().EvalEvent(context.Background(), reportEvent)
+					result, err := policyPtr.Load().EvalEventCached(context.Background(), reportEvent)
 					if err != nil {
 						logger.Log.Debugf("ipv6 policy eval failed: %v", err)
 						continue
@@ -745,6 +820,9 @@ func Run(cmd cobra.Command) error {
 		// Evaluate policy
 		var policyStatus = domain.EventPolicyStatusPass
 		taskname := utils.TrimNullBytes(event.Task)
+		if exeName := utils.ResolveCommFromExe(event.Pid); exeName != "" {
+			taskname = exeName
+		}
 		if taskname == progName {
 			continue
 		}
@@ -764,7 +842,7 @@ func Run(cmd cobra.Command) error {
 
 		// Policy logic
 		if tracerMode != domain.TracerModeMonitor {
-			result, err := policyPtr.Load().EvalEvent(context.Background(), reportEvent)
+			result, err := policyPtr.Load().EvalEventCached(context.Background(), reportEvent)
 			if err != nil {
 				logger.Log.Warnf("policy eval failed (skipping): %v", err)
 				continue
@@ -813,6 +891,7 @@ EXIT:
 	report.PrintReportTable()
 	report.PrintDNSTable()
 	report.PrintProcessTable(prettyOutput)
+	report.PrintSensitiveAccessReport()
 	report.PrintFileTable()
 	report.Close()
 	return nil
@@ -1040,6 +1119,13 @@ func preloadTCP6(m *ebpf.Map) int {
 		}
 	}
 	return count
+}
+
+func fmtEnvVars(vars []string) string {
+	if len(vars) == 0 {
+		return ""
+	}
+	return " env=[" + strings.Join(vars, ",") + "]"
 }
 
 func parseFlags(cmd *cobra.Command) (*domain.Data, error) {

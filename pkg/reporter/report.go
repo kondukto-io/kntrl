@@ -34,6 +34,7 @@ type Reporter struct {
 	Err            error
 	outputFileName string
 	file           *os.File
+	writer         *bufio.Writer
 	selfPID        uint32
 }
 
@@ -56,6 +57,7 @@ func NewReporter(outputFileName string) *Reporter {
 	}
 
 	report.file = file
+	report.writer = bufio.NewWriterSize(file, 64*1024)
 
 	return report
 }
@@ -136,7 +138,7 @@ func (r *Reporter) WriteEvent(event domain.ReportEvent) {
 		return
 	}
 
-	if _, err = r.file.WriteString(string(eventData) + "\n"); err != nil {
+	if _, err = r.writer.WriteString(string(eventData) + "\n"); err != nil {
 		logger.Log.Errorf("failed to write event to file: %s %v", r.file.Name(), err)
 	}
 }
@@ -154,7 +156,7 @@ func (r *Reporter) WriteFileEvent(event domain.FileReportEvent) {
 		return
 	}
 
-	if _, err = r.file.WriteString(string(eventData) + "\n"); err != nil {
+	if _, err = r.writer.WriteString(string(eventData) + "\n"); err != nil {
 		logger.Log.Errorf("failed to write file event to file: %s %v", r.file.Name(), err)
 	}
 }
@@ -172,7 +174,7 @@ func (r *Reporter) WriteDNSEvent(event domain.DNSReportEvent) {
 		return
 	}
 
-	if _, err = r.file.WriteString(string(eventData) + "\n"); err != nil {
+	if _, err = r.writer.WriteString(string(eventData) + "\n"); err != nil {
 		logger.Log.Errorf("failed to write dns event to file: %s %v", r.file.Name(), err)
 	}
 }
@@ -190,16 +192,19 @@ func (r *Reporter) WriteProcessEvent(event domain.ProcessReportEvent) {
 		return
 	}
 
-	if _, err = r.file.WriteString(string(eventData) + "\n"); err != nil {
+	if _, err = r.writer.WriteString(string(eventData) + "\n"); err != nil {
 		logger.Log.Errorf("failed to write process event to file: %s %v", r.file.Name(), err)
 	}
 }
 
-// Close closes the report file
+// Close flushes the buffered writer and closes the report file.
 func (r *Reporter) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if err := r.writer.Flush(); err != nil {
+		logger.Log.Errorf("failed to flush report writer: %v", err)
+	}
 	if err := r.file.Close(); err != nil {
 		logger.Log.Errorf("failed to close report file: %v", err)
 	}
@@ -263,15 +268,20 @@ func (r *Reporter) PrintFileTable() {
 
 	fmt.Print("\n\n")
 	data := pterm.TableData{
-		{"Pid", "Comm", "Filename", "Flags"},
+		{"Pid", "Comm", "Filename", "Policy", "Env Vars"},
 	}
 
 	for _, v := range r.fileEvents {
+		envVars := strings.Join(v.MatchedEnvVars, ", ")
+		if envVars == "" {
+			envVars = "."
+		}
 		res := []string{
 			strconv.FormatUint(uint64(v.ProcessID), 10),
 			v.Comm,
 			v.Filename,
-			strconv.FormatInt(int64(v.Flags), 10),
+			v.Policy,
+			envVars,
 		}
 		data = append(data, res)
 	}
@@ -472,6 +482,85 @@ func (r *Reporter) printProcessTree() {
 		printTree(root, "", i == len(roots)-1)
 	}
 	fmt.Println()
+}
+
+func (r *Reporter) PrintSensitiveAccessReport() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.fileEvents) == 0 {
+		return
+	}
+
+	// Aggregate by PID+Comm
+	type processKey struct {
+		pid  uint32
+		comm string
+	}
+	type accessSummary struct {
+		files   []string
+		envVars []string
+	}
+
+	seen := make(map[processKey]*accessSummary)
+	var order []processKey
+
+	for _, ev := range r.fileEvents {
+		k := processKey{pid: ev.ProcessID, comm: ev.Comm}
+		s, exists := seen[k]
+		if !exists {
+			s = &accessSummary{}
+			seen[k] = s
+			order = append(order, k)
+		}
+		// Dedup files (skip synthetic [inherited] marker)
+		if ev.Filename != "[inherited]" && !containsStr(s.files, ev.Filename) {
+			s.files = append(s.files, ev.Filename)
+		}
+		// Collect unique env vars
+		for _, v := range ev.MatchedEnvVars {
+			if !containsStr(s.envVars, v) {
+				s.envVars = append(s.envVars, v)
+			}
+		}
+	}
+
+	// Render table
+	fmt.Print("\n\n")
+	pterm.DefaultHeader.WithBackgroundStyle(pterm.NewStyle(pterm.BgDefault)).
+		WithTextStyle(pterm.NewStyle(pterm.FgLightRed, pterm.Bold)).
+		Println("Sensitive Access Report")
+
+	data := pterm.TableData{
+		{"Pid", "Comm", "Files Accessed", "Env Vars Detected"},
+	}
+	for _, k := range order {
+		s := seen[k]
+		files := strings.Join(s.files, ", ")
+		if files == "" {
+			files = "."
+		}
+		envVars := strings.Join(s.envVars, ", ")
+		if envVars == "" {
+			envVars = "."
+		}
+		data = append(data, []string{
+			strconv.FormatUint(uint64(k.pid), 10),
+			k.comm,
+			files,
+			envVars,
+		})
+	}
+	pterm.DefaultTable.WithHasHeader().WithRowSeparator("-").WithHeaderRowSeparator("-").WithData(data).Render()
+}
+
+func containsStr(sl []string, s string) bool {
+	for _, v := range sl {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func hash(text string) string {
