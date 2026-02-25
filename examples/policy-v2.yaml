@@ -40,14 +40,28 @@ rules:
         ancestors: ["npm"]
       - process: "wget"
         ancestors: ["pip"]
+    blocked_executables:
+      - "nc"
+      - "ncat"
+      - "socat"
+      - "trufflehog"
   dns:
     allowed_servers:
       - "8.8.8.8"
       - "8.8.4.4"
   file:
-    enabled: false
+    enabled: true
     monitored_paths:
       - "/etc/shadow"
       - "/root/.ssh/"
-      - "/proc/self/environ"
+      - "/var/run/secrets/"
+    protected_paths:
+      - "/etc/sudoers"
+      - "/etc/sudoers.d/"
+      - "/root/.ssh/authorized_keys"
+      - "/home/"
+      - "/etc/passwd"
+    monitored_env_vars:
+      - "GITHUB_TOKEN"
+      - "AWS_SECRET_ACCESS_KEY"
 webhooks: []

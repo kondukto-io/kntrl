@@ -26,7 +26,33 @@ var (
 	// Forward DNS cache: IP string → domain name (populated from BPF DNS events)
 	fwdDNSCache   = make(map[string]dnsCacheEntry)
 	fwdDNSCacheMu sync.RWMutex
+
+	// Async DNS worker channel
+	dnsChan     chan string
+	dnsOnce     sync.Once
 )
+
+// StartDNSWorker initializes the async DNS worker goroutine. Safe to call multiple times.
+func StartDNSWorker() {
+	dnsOnce.Do(func() {
+		dnsChan = make(chan string, 256)
+		go func() {
+			for domain := range dnsChan {
+				CacheDNSDomain(domain)
+			}
+		}()
+	})
+}
+
+// CacheDNSDomainAsync queues a domain for async DNS resolution.
+// Non-blocking: drops the request if the channel is full.
+func CacheDNSDomainAsync(domain string) {
+	select {
+	case dnsChan <- domain:
+	default:
+		// Channel full, drop to avoid blocking the hot path
+	}
+}
 
 // CacheDNSDomain resolves a domain name and caches IP → domain mappings.
 // Called when a DNS response event is observed from BPF.

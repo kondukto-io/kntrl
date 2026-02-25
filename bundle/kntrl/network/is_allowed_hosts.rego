@@ -6,5 +6,20 @@ policy if {
         hosts := input[_]
 
         some host in hosts
-        endswith(host, data.allowed_hosts[_])
+        allowed := data.allowed_hosts[_]
+        _host_matches(host, allowed)
+}
+
+_host_matches(host, pattern) if {
+        host == pattern
+}
+
+_host_matches(host, pattern) if {
+        startswith(pattern, ".")
+        endswith(host, pattern)
+}
+
+_host_matches(host, pattern) if {
+        not startswith(pattern, ".")
+        endswith(host, concat("", [".", pattern]))
 }

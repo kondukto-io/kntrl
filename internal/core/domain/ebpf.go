@@ -41,3 +41,9 @@ const EBPFCollectionMapFileMonitor = "file_monitor_map"
 
 // EBPFCollectionMapSelfTGID holds kntrl's own TGID for BPF-level self-filtering
 const EBPFCollectionMapSelfTGID = "self_tgid_map"
+
+// EBPFCollectionMapBlockedExec is the hash map of executable names to block
+const EBPFCollectionMapBlockedExec = "blocked_exec_map"
+
+// EBPFCollectionMapProtectedPaths is the hash map of paths to protect from writes
+const EBPFCollectionMapProtectedPaths = "protected_paths_map"

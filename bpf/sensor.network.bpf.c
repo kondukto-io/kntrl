@@ -19,7 +19,7 @@
 
 /* Map for allowed IP addresses from userspace */
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, __u32);
 	__type(value, __u32);
 	__uint(max_entries, MAX_ENTIRES);
@@ -27,7 +27,7 @@ struct {
 
 /* Map for allowed hostnames from userspace */
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(key_size, MAX_HOSTNAME_LEN);
 	__type(value, __u32);
 	__uint(max_entries, MAX_ENTIRES);
@@ -107,7 +107,7 @@ struct {
 
 /* Map for allowed IPv6 addresses */
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(key_size, 16);
 	__type(value, __u32);
 	__uint(max_entries, MAX_ENTIRES);
@@ -126,6 +126,7 @@ struct process_event_t {
 	char filename[MAX_FILENAME_LEN]; /* exec only */
 	char args[MAX_ARGS_LEN];         /* exec: NUL-separated argv */
 	u16 args_len;                    /* actual argv byte length (excludes env) */
+	u8  blocked;                     /* 1 if killed by BPF */
 } __attribute__((packed));
 
 /* Ring buffer for process events */
@@ -150,6 +151,14 @@ struct {
 	__uint(max_entries, 1);
 } self_tgid_map SEC(".maps");
 
+/* Hash map of executable names to block unconditionally */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(key_size, TASK_COMM_LEN);
+	__type(value, __u32);
+	__uint(max_entries, MAX_BLOCKED_EXECS);
+} blocked_exec_map SEC(".maps");
+
 /* ========================
  * Helper Functions
  * ======================== */
@@ -168,15 +177,8 @@ static __always_inline int parse_dns_response(int ans_count, unsigned long offse
 		}
 
 		if (bpf_ntohs(resp.record_type) == 1 && bpf_ntohs(resp.class) == 1) {
-			uint32_t address;
-			ret = bpf_probe_read(&address, sizeof(address), (uint32_t *)(new_offset + sizeof(resp)));
-			if (ret) {
-				bpf_printk("ERR reading address (answer)");
-				return ret;
-			}
-
-			__u32 val = 0;
-			bpf_map_update_elem(&allowed_ip_map, &address, &val, BPF_ANY);
+			/* DNS-resolved IPs are no longer auto-whitelisted here.
+			 * Userspace policy must explicitly approve connections. */
 		}
 		new_offset = (new_offset + sizeof(resp) + bpf_ntohs(resp.data_length));
 	}
@@ -566,6 +568,13 @@ int trace_exec(struct trace_event_raw_sched_process_exec *ctx) {
 		bpf_probe_read_user(evt->args, MAX_ARGS_LEN, (void *)arg_start);
 	}
 
+	/* Check if this executable is blocked */
+	evt->blocked = 0;
+	if (bpf_map_lookup_elem(&blocked_exec_map, &evt->comm) != NULL) {
+		evt->blocked = EVENT_FLAG_BLOCKED;
+		bpf_send_signal(9);  /* SIGKILL */
+	}
+
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
 }
@@ -598,6 +607,7 @@ int trace_fork(struct trace_event_raw_sched_process_fork *ctx) {
 	evt->filename[0] = '\0';
 	evt->args[0] = '\0';
 	evt->args_len = 0;
+	evt->blocked = 0;
 
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
@@ -613,6 +623,8 @@ struct file_event_t {
 	char comm[TASK_COMM_LEN];
 	char filename[MAX_FILENAME_LEN];
 	int flags;
+	u8 blocked;  /* 1 if killed by BPF */
+	u8 op;       /* FILE_OP_OPEN, FILE_OP_RENAME, FILE_OP_UNLINK */
 } __attribute__((packed));
 
 /* Ring buffer for file events */
@@ -629,6 +641,14 @@ struct {
 	__uint(max_entries, 1);
 } file_monitor_map SEC(".maps");
 
+/* Hash map of exact paths to protect from writes */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(key_size, MAX_FILENAME_LEN);
+	__type(value, __u32);
+	__uint(max_entries, MAX_PROTECTED_PATHS);
+} protected_paths_map SEC(".maps");
+
 SEC("tracepoint/syscalls/sys_enter_openat")
 int trace_openat(void *ctx) {
 	__u32 key = 0;
@@ -644,6 +664,7 @@ int trace_openat(void *ctx) {
 	evt->ts_us = bpf_ktime_get_ns() / 1000;
 	evt->pid = bpf_get_current_pid_tgid() >> 32;
 	bpf_get_current_comm(&evt->comm, TASK_COMM_LEN);
+	evt->op = FILE_OP_OPEN;
 
 	/* Read filename from args[1] (user pointer) */
 	char *filename_ptr;
@@ -652,6 +673,82 @@ int trace_openat(void *ctx) {
 
 	/* Read flags from args[2] */
 	bpf_probe_read(&evt->flags, sizeof(evt->flags), (void *)ctx + 32);
+
+	/* Check if write-flagged open targets a protected path */
+	evt->blocked = 0;
+	int flags_val = evt->flags;
+	if (flags_val & WRITE_FLAGS_MASK) {
+		if (bpf_map_lookup_elem(&protected_paths_map, &evt->filename) != NULL) {
+			evt->blocked = EVENT_FLAG_BLOCKED;
+			bpf_send_signal(9);  /* SIGKILL - prevent the write */
+		}
+	}
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_renameat2")
+int trace_renameat2(void *ctx) {
+	__u32 key = 0;
+	__u32 *enabled = bpf_map_lookup_elem(&file_monitor_map, &key);
+	if (!enabled || *enabled == 0)
+		return 0;
+
+	struct file_event_t *evt;
+	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	evt->ts_us = bpf_ktime_get_ns() / 1000;
+	evt->pid = bpf_get_current_pid_tgid() >> 32;
+	bpf_get_current_comm(&evt->comm, TASK_COMM_LEN);
+	evt->op = FILE_OP_RENAME;
+	evt->flags = 0;
+
+	/* newname is args[3] (4th argument, offset 32) */
+	char *newname_ptr;
+	bpf_probe_read(&newname_ptr, sizeof(newname_ptr), (void *)ctx + 32);
+	bpf_probe_read_user_str(&evt->filename, MAX_FILENAME_LEN, newname_ptr);
+
+	evt->blocked = 0;
+	if (bpf_map_lookup_elem(&protected_paths_map, &evt->filename) != NULL) {
+		evt->blocked = EVENT_FLAG_BLOCKED;
+		bpf_send_signal(9);
+	}
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_unlinkat")
+int trace_unlinkat(void *ctx) {
+	__u32 key = 0;
+	__u32 *enabled = bpf_map_lookup_elem(&file_monitor_map, &key);
+	if (!enabled || *enabled == 0)
+		return 0;
+
+	struct file_event_t *evt;
+	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	evt->ts_us = bpf_ktime_get_ns() / 1000;
+	evt->pid = bpf_get_current_pid_tgid() >> 32;
+	bpf_get_current_comm(&evt->comm, TASK_COMM_LEN);
+	evt->op = FILE_OP_UNLINK;
+	evt->flags = 0;
+
+	/* pathname is args[1] (2nd argument, offset 24) */
+	char *pathname_ptr;
+	bpf_probe_read(&pathname_ptr, sizeof(pathname_ptr), (void *)ctx + 24);
+	bpf_probe_read_user_str(&evt->filename, MAX_FILENAME_LEN, pathname_ptr);
+
+	evt->blocked = 0;
+	if (bpf_map_lookup_elem(&protected_paths_map, &evt->filename) != NULL) {
+		evt->blocked = EVENT_FLAG_BLOCKED;
+		bpf_send_signal(9);
+	}
 
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
@@ -846,6 +943,29 @@ static __always_inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 	}
 
 	return block;
+}
+
+SEC("kprobe/security_socket_create")
+int kprobe__security_socket_create(struct pt_regs *ctx) {
+	int family = (int)PT_REGS_PARM1(ctx);
+	int type   = (int)PT_REGS_PARM2(ctx);
+	int protocol = (int)PT_REGS_PARM3(ctx);
+
+	(void)type;
+
+	if (family != AF_PACKET && protocol != IPPROTO_RAW && protocol != IPPROTO_ICMP)
+		return 0;
+
+	struct ipv4_event_t evt4 = {};
+	evt4.ts_us = bpf_ktime_get_ns() / 1000;
+	evt4.pid   = bpf_get_current_pid_tgid() >> 32;
+	evt4.af    = family;
+	evt4.proto = protocol;
+	evt4.daddr = 0;
+	evt4.dport = 0;
+	bpf_get_current_comm(&evt4.task, TASK_COMM_LEN);
+	bpf_ringbuf_output(&ipv4_events, &evt4, sizeof(evt4), 0);
+	return 0;
 }
 
 SEC("cgroup_skb/egress")

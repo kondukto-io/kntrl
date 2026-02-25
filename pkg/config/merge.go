@@ -1,6 +1,9 @@
 package config
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
 // Merge combines two PolicyConfigs. override takes precedence over base.
 // Slices are unioned (deduped). Booleans: override wins if non-nil.
@@ -49,6 +52,10 @@ func Merge(base, override *PolicyConfig) *PolicyConfig {
 		result.Rules.Process.BlockedChains,
 		override.Rules.Process.BlockedChains...,
 	)
+	result.Rules.Process.BlockedExecutables = dedup(append(
+		result.Rules.Process.BlockedExecutables,
+		override.Rules.Process.BlockedExecutables...,
+	))
 
 	// Merge DNS rules
 	result.Rules.DNS.AllowedServers = dedup(append(
@@ -64,9 +71,24 @@ func Merge(base, override *PolicyConfig) *PolicyConfig {
 		result.Rules.File.MonitoredPaths,
 		override.Rules.File.MonitoredPaths...,
 	))
+	result.Rules.File.ProtectedPaths = dedup(append(
+		result.Rules.File.ProtectedPaths,
+		override.Rules.File.ProtectedPaths...,
+	))
+	result.Rules.File.MonitoredEnvVars = dedup(append(
+		result.Rules.File.MonitoredEnvVars,
+		override.Rules.File.MonitoredEnvVars...,
+	))
 
 	// Merge webhooks (append)
 	result.Webhooks = append(result.Webhooks, override.Webhooks...)
+
+	if override.APIKey != "" {
+		result.APIKey = override.APIKey
+	}
+	if override.APIURL != "" {
+		result.APIURL = override.APIURL
+	}
 
 	return &result
 }
@@ -108,6 +130,21 @@ func ApplyCLIFlags(cfg *PolicyConfig, flags CLIFlags) *PolicyConfig {
 	}
 	if flags.AllowMetadata != nil {
 		result.Rules.Network.AllowMetadata = flags.AllowMetadata
+	}
+
+	if flags.APIKey != "" {
+		result.APIKey = flags.APIKey
+	}
+	if flags.APIURL != "" {
+		result.APIURL = flags.APIURL
+	}
+
+	// Env var fallback (lowest priority)
+	if result.APIKey == "" {
+		result.APIKey = os.Getenv("KNTRL_API_KEY")
+	}
+	if result.APIURL == "" {
+		result.APIURL = os.Getenv("KNTRL_API_URL")
 	}
 
 	return &result

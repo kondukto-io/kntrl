@@ -6,6 +6,8 @@ import (
 	files "io/fs"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/kondukto-io/kntrl/internal/core/domain"
 	"github.com/open-policy-agent/opa/bundle"
@@ -34,10 +36,18 @@ func WithExternalRego(paths []string) Option {
 	}
 }
 
+const policyCacheTTL = 30 * time.Second
+
+type policyCacheEntry struct {
+	result    bool
+	expiresAt time.Time
+}
+
 // Policy struct stores the pre-compiled OPA query for efficient repeated evaluation.
 type Policy struct {
-	regoArgs []func(r *rego.Rego)
-	prepared *rego.PreparedEvalQuery
+	regoArgs    []func(r *rego.Rego)
+	prepared    *rego.PreparedEvalQuery
+	policyCache sync.Map
 }
 
 // New creates a new Rego policy engine.
@@ -159,6 +169,41 @@ func (p *Policy) EvalEvent(ctx context.Context, event domain.ReportEvent) (bool,
 	}
 
 	return p.Eval(ctx, input)
+}
+
+// EvalEventCached evaluates the policy with caching.
+// Cache key includes task name, destination, port, and ancestors to ensure
+// ancestry-based rules (e.g. block python-from-npm) are evaluated correctly.
+func (p *Policy) EvalEventCached(ctx context.Context, event domain.ReportEvent) (bool, error) {
+	key := event.TaskName + "|" + event.DestinationAddress + "|" + fmt.Sprint(event.DestinationPort) + "|" + strings.Join(event.Ancestors, ",")
+
+	if cached, ok := p.policyCache.Load(key); ok {
+		entry := cached.(policyCacheEntry)
+		if time.Now().Before(entry.expiresAt) {
+			return entry.result, nil
+		}
+		p.policyCache.Delete(key)
+	}
+
+	result, err := p.EvalEvent(ctx, event)
+	if err != nil {
+		return false, err
+	}
+
+	p.policyCache.Store(key, policyCacheEntry{
+		result:    result,
+		expiresAt: time.Now().Add(policyCacheTTL),
+	})
+
+	return result, nil
+}
+
+// FlushCache clears the policy result cache. Called on SIGHUP reload.
+func (p *Policy) FlushCache() {
+	p.policyCache.Range(func(key, _ any) bool {
+		p.policyCache.Delete(key)
+		return true
+	})
 }
 
 func unmarshal(data []byte) (dataJson map[string]any, err error) {

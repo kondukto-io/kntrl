@@ -7,7 +7,22 @@ policy if {
 	profile := data.process_profiles[_]
 	input.task_name == profile.process
 	some host in input.domains
-	endswith(host, profile.allowed_hosts[_])
+	allowed := profile.allowed_hosts[_]
+	_host_matches(host, allowed)
+}
+
+_host_matches(host, pattern) if {
+	host == pattern
+}
+
+_host_matches(host, pattern) if {
+	startswith(pattern, ".")
+	endswith(host, pattern)
+}
+
+_host_matches(host, pattern) if {
+	not startswith(pattern, ".")
+	endswith(host, concat("", [".", pattern]))
 }
 
 # Allow if process matches a profile and the destination IP is in an allowed CIDR

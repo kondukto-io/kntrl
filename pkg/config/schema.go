@@ -6,6 +6,8 @@ type PolicyConfig struct {
 	Mode     string          `yaml:"mode"`
 	Rules    RulesConfig     `yaml:"rules"`
 	Webhooks []WebhookConfig `yaml:"webhooks"`
+	APIKey   string          `yaml:"api_key"`
+	APIURL   string          `yaml:"api_url"`
 }
 
 // WebhookConfig represents a webhook alerting destination.
@@ -25,8 +27,10 @@ type RulesConfig struct {
 
 // FileRules contains file access monitoring policy rules.
 type FileRules struct {
-	Enabled        *bool    `yaml:"enabled"`
-	MonitoredPaths []string `yaml:"monitored_paths"`
+	Enabled          *bool    `yaml:"enabled"`
+	MonitoredPaths   []string `yaml:"monitored_paths"`
+	ProtectedPaths   []string `yaml:"protected_paths"`
+	MonitoredEnvVars []string `yaml:"monitored_env_vars"`
 }
 
 // DNSRules contains DNS monitoring policy rules.
@@ -36,8 +40,9 @@ type DNSRules struct {
 
 // ProcessRules contains process monitoring policy rules.
 type ProcessRules struct {
-	Enabled       *bool                `yaml:"enabled"` // default true
-	BlockedChains []BlockedChainConfig `yaml:"blocked_chains"`
+	Enabled            *bool                `yaml:"enabled"` // default true
+	BlockedChains      []BlockedChainConfig `yaml:"blocked_chains"`
+	BlockedExecutables []string             `yaml:"blocked_executables"`
 }
 
 // BlockedChainConfig defines a process ancestry chain to block.
@@ -74,4 +79,6 @@ type CLIFlags struct {
 	Mode             string
 	RulesFile        string
 	RulesDir         string
+	APIKey           string
+	APIURL           string
 }

@@ -28,6 +28,8 @@ import (
 
 	"github.com/kondukto-io/kntrl/bundle"
 	"github.com/kondukto-io/kntrl/internal/core/domain"
+	"github.com/kondukto-io/kntrl/pkg/ci"
+	"github.com/kondukto-io/kntrl/pkg/cloud"
 	"github.com/kondukto-io/kntrl/pkg/config"
 	ebpfman "github.com/kondukto-io/kntrl/pkg/ebpf"
 	"github.com/kondukto-io/kntrl/pkg/logger"
@@ -55,6 +57,8 @@ var tracePointAttach = map[string][2]string{
 	"trace_exec":          {"sched", "sched_process_exec"},
 	"trace_fork":          {"sched", "sched_process_fork"},
 	"trace_openat":        {"syscalls", "sys_enter_openat"},
+	"trace_renameat2":     {"syscalls", "sys_enter_renameat2"},
+	"trace_unlinkat":      {"syscalls", "sys_enter_unlinkat"},
 }
 
 func init() {
@@ -89,11 +93,14 @@ func Run(cmd cobra.Command) error {
 	var cmddata *domain.Data
 	var externalRegoFiles []string
 	var webhookConfigs []config.WebhookConfig
+	var policyCfg *config.PolicyConfig
 
 	if rulesFile != "" || rulesDir != "" {
 		// New config system: load from YAML + directory + CLI flags
 		cliFlags := gatherCLIFlags(&cmd)
-		policyCfg, regoFiles, err := config.LoadAll(rulesFile, rulesDir, cliFlags)
+		var regoFiles []string
+		var err error
+		policyCfg, regoFiles, err = config.LoadAll(rulesFile, rulesDir, cliFlags)
 		if err != nil {
 			return fmt.Errorf("config loading error: %w", err)
 		}
@@ -147,6 +154,22 @@ func Run(cmd cobra.Command) error {
 		webhookClient = webhook.New(whConfigs)
 		webhookClient.Start(context.Background())
 		logger.Log.Infof("webhook alerting enabled with %d endpoint(s)", len(whConfigs))
+	}
+
+	// CI environment detection
+	ciMeta := ci.Detect()
+	if ciMeta != nil {
+		logger.Log.Infof("CI detected: %s (repo=%s branch=%s)", ciMeta.Provider, ciMeta.Repository, ciMeta.Branch)
+	}
+
+	// Cloud upload client setup
+	var cloudClient *cloud.Client
+	apiKey, apiURL := resolveCloudConfig(&cmd, policyCfg, rulesFile, rulesDir)
+	if apiKey != "" && apiURL != "" {
+		sessionID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid())
+		cloudClient = cloud.New(cloud.Config{APIURL: apiURL, APIKey: apiKey}, ciMeta, sessionID)
+		cloudClient.Start(context.Background())
+		logger.Log.Infof("cloud upload enabled (session=%s)", sessionID)
 	}
 
 	var ebpfClient = ebpfman.New()
@@ -324,6 +347,30 @@ func Run(cmd cobra.Command) error {
 		}
 	}
 
+	// Populate blocked exec map for BPF-level process blocking
+	blockedExecMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapBlockedExec]
+	if blockedExecMap != nil && cmddata.BlockedExecutables != nil {
+		for _, exe := range cmddata.BlockedExecutables {
+			var key [16]byte
+			copy(key[:], exe)
+			if err := blockedExecMap.Put(key, uint32(1)); err != nil {
+				logger.Log.Warnf("failed to update blocked exec map: %v", err)
+			}
+		}
+	}
+
+	// Populate protected paths map for BPF-level file write protection
+	protectedPathsMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapProtectedPaths]
+	if protectedPathsMap != nil && cmddata.ProtectedPaths != nil {
+		for _, path := range cmddata.ProtectedPaths {
+			var key [256]byte
+			copy(key[:], path)
+			if err := protectedPathsMap.Put(key, uint32(1)); err != nil {
+				logger.Log.Warnf("failed to update protected paths map: %v", err)
+			}
+		}
+	}
+
 	// Preload established TCP connections so existing sessions (e.g. SSH) survive BPF attach
 	preloadEstablishedConns(allowedIPMap, allowedIPv6Map)
 
@@ -425,6 +472,27 @@ func Run(cmd cobra.Command) error {
 					logger.Log.Errorf("SIGHUP: failed to update IPv6 maps: %v", err)
 				}
 			}
+			// Reload blocked exec map
+			if blockedExecMap != nil && newData.BlockedExecutables != nil {
+				for _, exe := range newData.BlockedExecutables {
+					var key [16]byte
+					copy(key[:], exe)
+					if err := blockedExecMap.Put(key, uint32(1)); err != nil {
+						logger.Log.Warnf("SIGHUP: failed to update blocked exec map: %v", err)
+					}
+				}
+			}
+			// Reload protected paths map
+			if protectedPathsMap != nil && newData.ProtectedPaths != nil {
+				for _, path := range newData.ProtectedPaths {
+					var key [256]byte
+					copy(key[:], path)
+					if err := protectedPathsMap.Put(key, uint32(1)); err != nil {
+						logger.Log.Warnf("SIGHUP: failed to update protected paths map: %v", err)
+					}
+				}
+			}
+			cmddata = newData
 			policyPtr.Store(newPolicy)
 			newPolicy.FlushCache()
 			logger.Log.Info("SIGHUP: policy reloaded successfully")
@@ -519,9 +587,40 @@ func Run(cmd cobra.Command) error {
 
 				procTree.Update(event.Pid, event.PPid, reportEvent.Comm)
 
+				// Process blocking logic
+				if event.EventType == domain.ProcessEventTypeExec {
+					reportEvent.Ancestors = procTree.GetAncestors(event.Pid, 32)
+
+					if event.Blocked == 1 {
+						// Already killed by BPF
+						reportEvent.Policy = domain.EventPolicyStatusBlock
+						logger.Log.Warnf("[process:block:bpf] pid=%d comm=%s KILLED", event.Pid, reportEvent.Comm)
+					} else if tracerMode == domain.TracerModeTrace && isAncestryBlocked(reportEvent.Comm, reportEvent.Ancestors, cmddata.BlockedProcessChains) {
+						// Ancestry-based block: kill from userspace
+						syscall.Kill(int(event.Pid), syscall.SIGKILL)
+						reportEvent.Policy = domain.EventPolicyStatusBlock
+						logger.Log.Warnf("[process:block:ancestry] pid=%d comm=%s ancestors=%v KILLED", event.Pid, reportEvent.Comm, reportEvent.Ancestors)
+					}
+				}
+
 				report.WriteProcessEvent(reportEvent)
-				logger.Log.Infof("[process] %s pid=%d ppid=%d comm=%s file=%s args=%q",
-					eventTypeStr, event.Pid, event.PPid, reportEvent.Comm, reportEvent.Filename, reportEvent.Args)
+				if cloudClient != nil {
+					cloudClient.Send("process", int64(event.TsUs), reportEvent)
+				}
+
+				// Webhook alerting for blocked process events
+				if webhookClient != nil && reportEvent.Policy == domain.EventPolicyStatusBlock {
+					webhookClient.Send(webhook.Event{
+						Type:      "process_block",
+						Timestamp: int64(event.TsUs),
+						Data:      reportEvent,
+					})
+				}
+
+				if reportEvent.Policy != domain.EventPolicyStatusBlock {
+					logger.Log.Infof("[process] %s pid=%d ppid=%d comm=%s file=%s args=%q",
+						eventTypeStr, event.Pid, event.PPid, reportEvent.Comm, reportEvent.Filename, reportEvent.Args)
+				}
 
 				// Primary env var detection: scan at exec time
 				if eventTypeStr == "exec" && len(monitoredEnvVars) > 0 {
@@ -603,14 +702,29 @@ func Run(cmd cobra.Command) error {
 
 				filename := trimNullBytesLong(event.Filename[:])
 
-				// Path filtering: drop events not matching any monitored path
-				isEnvFile := len(monitoredEnvVars) > 0 && utils.IsEnvironFile(filename)
-				var matched bool
-				if hasPathFilter {
-					matched, _ = utils.MatchesMonitoredPath(filename, monitoredPaths)
+				// Map operation type
+				var opStr string
+				switch event.Op {
+				case domain.FileOpRename:
+					opStr = "rename"
+				case domain.FileOpUnlink:
+					opStr = "unlink"
+				default:
+					opStr = "open"
 				}
-				if !matched && !isEnvFile {
-					continue // Drop: doesn't match any monitored path or env pattern
+
+				// Blocked events always pass through; non-blocked need path filter
+				isFileBlocked := event.Blocked == 1
+				if !isFileBlocked {
+					// Path filtering: drop events not matching any monitored path
+					isEnvFile := len(monitoredEnvVars) > 0 && utils.IsEnvironFile(filename)
+					var matched bool
+					if hasPathFilter {
+						matched, _ = utils.MatchesMonitoredPath(filename, monitoredPaths)
+					}
+					if !matched && !isEnvFile {
+						continue // Drop: doesn't match any monitored path or env pattern
+					}
 				}
 
 				reportEvent := domain.FileReportEvent{
@@ -620,28 +734,46 @@ func Run(cmd cobra.Command) error {
 					Flags:       event.Flags,
 					TimestampUs: event.TsUs,
 					Policy:      "flag",
+					Operation:   opStr,
+				}
+
+				if isFileBlocked {
+					reportEvent.Policy = domain.EventPolicyStatusBlock
+					reportEvent.Blocked = true
+					logger.Log.Warnf("[file:block:bpf] pid=%d comm=%s file=%s op=%s KILLED",
+						event.Pid, comm, filename, opStr)
 				}
 
 				// Env var detection for /proc/*/environ accesses
-				if isEnvFile {
+				isEnvFile2 := len(monitoredEnvVars) > 0 && utils.IsEnvironFile(filename)
+				if isEnvFile2 {
 					if vars := utils.FindMatchingEnvVars(event.Pid, monitoredEnvVars); len(vars) > 0 {
 						reportEvent.MatchedEnvVars = vars
 					}
 				}
 
 				report.WriteFileEvent(reportEvent)
+				if cloudClient != nil {
+					cloudClient.Send("file", int64(event.TsUs), reportEvent)
+				}
 
-				// Webhook: send flagged file events
+				// Webhook: send flagged/blocked file events
 				if webhookClient != nil {
+					eventType := "file_flag"
+					if isFileBlocked {
+						eventType = "file_block"
+					}
 					webhookClient.Send(webhook.Event{
-						Type:      "file_flag",
+						Type:      eventType,
 						Timestamp: int64(event.TsUs),
 						Data:      reportEvent,
 					})
 				}
 
-				logger.Log.Infof("[file] pid=%d comm=%s file=%s policy=flag%s",
-					event.Pid, comm, filename, fmtEnvVars(reportEvent.MatchedEnvVars))
+				if !isFileBlocked {
+					logger.Log.Infof("[file] pid=%d comm=%s file=%s op=%s policy=flag%s",
+						event.Pid, comm, filename, opStr, fmtEnvVars(reportEvent.MatchedEnvVars))
+				}
 			}
 		}()
 	}
@@ -706,6 +838,9 @@ func Run(cmd cobra.Command) error {
 				}
 
 				report.WriteDNSEvent(reportEvent)
+				if cloudClient != nil {
+					cloudClient.Send("dns", int64(event.TsUs), reportEvent)
+				}
 				logger.Log.Infof("[dns] pid=%d server=%s domain=%s response=%v",
 					event.Pid, reportEvent.DNSServer, reportEvent.QueryDomain, reportEvent.IsResponse)
 			}
@@ -782,6 +917,9 @@ func Run(cmd cobra.Command) error {
 				}
 
 				report.WriteEvent(reportEvent)
+				if cloudClient != nil {
+					cloudClient.Send("network", int64(event.TsUs), reportEvent)
+				}
 				logger.Log.Infof("[%d]%s -> %s:%d (%s) [%s/ipv6]| %s",
 					event.Pid, taskname, domainAddress, event.Dport, domainNames, protocol, policyStatus)
 			}
@@ -863,6 +1001,9 @@ func Run(cmd cobra.Command) error {
 
 		// Report
 		report.WriteEvent(reportEvent)
+		if cloudClient != nil {
+			cloudClient.Send("network", int64(event.TsUs), reportEvent)
+		}
 
 		// Webhook alerting
 		if webhookClient != nil {
@@ -893,6 +1034,24 @@ EXIT:
 	report.PrintProcessTable(prettyOutput)
 	report.PrintSensitiveAccessReport()
 	report.PrintFileTable()
+
+	if cloudClient != nil {
+		summary := cloud.SummaryPayload{
+			Mode:          tracerMode,
+			NetworkEvents: report.GetEvents(),
+			ProcessEvents: report.GetProcessEvents(),
+			DNSEvents:     report.GetDNSEvents(),
+			FileEvents:    report.GetFileEvents(),
+			Counts:        report.GetSummaryCounts(),
+		}
+		if err := cloudClient.SendSummary(summary); err != nil {
+			logger.Log.Errorf("cloud summary upload failed: %v", err)
+		} else {
+			logger.Log.Info("cloud summary uploaded successfully")
+		}
+		cloudClient.Close()
+	}
+
 	report.Close()
 	return nil
 }
@@ -905,6 +1064,8 @@ func gatherCLIFlags(cmd *cobra.Command) config.CLIFlags {
 	flags.Mode = cmd.Flag("mode").Value.String()
 	flags.RulesFile, _ = cmd.Flags().GetString("rules-file")
 	flags.RulesDir, _ = cmd.Flags().GetString("rules-dir")
+	flags.APIKey, _ = cmd.Flags().GetString("api-key")
+	flags.APIURL, _ = cmd.Flags().GetString("api-url")
 
 	if cmd.Flags().Changed("allow-local-ranges") {
 		val, _ := cmd.Flags().GetBool("allow-local-ranges")
@@ -1128,6 +1289,22 @@ func fmtEnvVars(vars []string) string {
 	return " env=[" + strings.Join(vars, ",") + "]"
 }
 
+func resolveCloudConfig(cmd *cobra.Command, policyCfg *config.PolicyConfig, rulesFile, rulesDir string) (string, string) {
+	if (rulesFile != "" || rulesDir != "") && policyCfg != nil {
+		return policyCfg.APIKey, policyCfg.APIURL
+	}
+	// Legacy mode: CLI flags + env fallback
+	key, _ := cmd.Flags().GetString("api-key")
+	url, _ := cmd.Flags().GetString("api-url")
+	if key == "" {
+		key = os.Getenv("KNTRL_API_KEY")
+	}
+	if url == "" {
+		url = os.Getenv("KNTRL_API_URL")
+	}
+	return key, url
+}
+
 func parseFlags(cmd *cobra.Command) (*domain.Data, error) {
 	allowedHostsFlag := cmd.Flag("allowed-hosts")
 	allowedIPAddrFlag := cmd.Flag("allowed-ips")
@@ -1156,4 +1333,32 @@ func parseFlags(cmd *cobra.Command) (*domain.Data, error) {
 		localranges,
 		allowmeta,
 	), nil
+}
+
+// isAncestryBlocked checks if a process with the given comm and ancestors matches
+// any blocked process chain configuration.
+func isAncestryBlocked(comm string, ancestors []string, chains []domain.BlockedProcessChain) bool {
+	for _, chain := range chains {
+		if chain.Process != comm {
+			continue
+		}
+		allFound := true
+		for _, required := range chain.Ancestors {
+			found := false
+			for _, actual := range ancestors {
+				if required == actual {
+					found = true
+					break
+				}
+			}
+			if !found {
+				allFound = false
+				break
+			}
+		}
+		if allFound {
+			return true
+		}
+	}
+	return false
 }

@@ -268,7 +268,7 @@ func (r *Reporter) PrintFileTable() {
 
 	fmt.Print("\n\n")
 	data := pterm.TableData{
-		{"Pid", "Comm", "Filename", "Policy", "Env Vars"},
+		{"Pid", "Comm", "Filename", "Op", "Policy", "Env Vars"},
 	}
 
 	for _, v := range r.fileEvents {
@@ -276,10 +276,15 @@ func (r *Reporter) PrintFileTable() {
 		if envVars == "" {
 			envVars = "."
 		}
+		opStr := v.Operation
+		if opStr == "" {
+			opStr = "open"
+		}
 		res := []string{
 			strconv.FormatUint(uint64(v.ProcessID), 10),
 			v.Comm,
 			v.Filename,
+			opStr,
 			v.Policy,
 			envVars,
 		}
@@ -352,12 +357,16 @@ func (r *Reporter) printProcessFlat() {
 
 	fmt.Print("\n\n")
 	data := pterm.TableData{
-		{"Pid", "PPid", "Type", "Comm", "Args"},
+		{"Pid", "PPid", "Type", "Comm", "Args", "Policy"},
 	}
 
 	for _, v := range r.processEvents {
 		if selfSet[v.ProcessID] {
 			continue
+		}
+		policyStr := v.Policy
+		if policyStr == "" {
+			policyStr = "."
 		}
 		res := []string{
 			strconv.FormatUint(uint64(v.ProcessID), 10),
@@ -365,6 +374,7 @@ func (r *Reporter) printProcessFlat() {
 			v.EventType,
 			v.Comm,
 			v.Args,
+			policyStr,
 		}
 		data = append(data, res)
 	}
@@ -552,6 +562,67 @@ func (r *Reporter) PrintSensitiveAccessReport() {
 		})
 	}
 	pterm.DefaultTable.WithHasHeader().WithRowSeparator("-").WithHeaderRowSeparator("-").WithData(data).Render()
+}
+
+// GetEvents returns a copy of all network report events.
+func (r *Reporter) GetEvents() []domain.ReportEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	out := make([]domain.ReportEvent, len(r.events))
+	copy(out, r.events)
+	return out
+}
+
+// GetProcessEvents returns a copy of all process report events.
+func (r *Reporter) GetProcessEvents() []domain.ProcessReportEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	out := make([]domain.ProcessReportEvent, len(r.processEvents))
+	copy(out, r.processEvents)
+	return out
+}
+
+// GetDNSEvents returns a copy of all DNS report events.
+func (r *Reporter) GetDNSEvents() []domain.DNSReportEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	out := make([]domain.DNSReportEvent, len(r.dnsEvents))
+	copy(out, r.dnsEvents)
+	return out
+}
+
+// GetFileEvents returns a copy of all file report events.
+func (r *Reporter) GetFileEvents() []domain.FileReportEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	out := make([]domain.FileReportEvent, len(r.fileEvents))
+	copy(out, r.fileEvents)
+	return out
+}
+
+// GetSummaryCounts returns aggregate counts from the collected events.
+func (r *Reporter) GetSummaryCounts() domain.SummaryCounts {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	counts := domain.SummaryCounts{
+		TotalNetwork: len(r.events),
+		TotalProcess: len(r.processEvents),
+		TotalDNS:     len(r.dnsEvents),
+		TotalFile:    len(r.fileEvents),
+	}
+	for _, e := range r.events {
+		if e.Policy == domain.EventPolicyStatusBlock {
+			counts.Blocked++
+		} else {
+			counts.Passed++
+		}
+	}
+	return counts
 }
 
 func containsStr(sl []string, s string) bool {

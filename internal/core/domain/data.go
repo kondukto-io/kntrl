@@ -31,6 +31,10 @@ type Data struct {
 	ProcessProfiles []ProcessProfileData `json:"process_profiles,omitempty"`
 	// BlockedProcessChains are process ancestry chains to deny.
 	BlockedProcessChains []BlockedProcessChain `json:"blocked_process_chains,omitempty"`
+	// BlockedExecutables are executable names to kill unconditionally at BPF level.
+	BlockedExecutables []string `json:"blocked_executables,omitempty"`
+	// ProtectedPaths are file paths to protect from writes/renames/deletes.
+	ProtectedPaths []string `json:"protected_paths,omitempty"`
 }
 
 // BlockedProcessChain represents a process ancestry chain to deny in OPA.

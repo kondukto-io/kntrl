@@ -51,3 +51,13 @@ const (
 	EventProtocolTCP = "tcp"
 	EventProtocolUDP = "udp"
 )
+
+// SummaryCounts holds aggregate event counts for a session summary.
+type SummaryCounts struct {
+	TotalNetwork int `json:"total_network"`
+	TotalProcess int `json:"total_process"`
+	TotalDNS     int `json:"total_dns"`
+	TotalFile    int `json:"total_file"`
+	Blocked      int `json:"blocked"`
+	Passed       int `json:"passed"`
+}

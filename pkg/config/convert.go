@@ -129,17 +129,19 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 	}
 
 	data := &domain.Data{
-		AllowedHosts:       dedup(hosts),
-		AllowedIPs:         ips,
-		AllowGithubMeta:    allowGithubMeta,
-		AllowLocalIPRanges: allowLocalRanges,
-		AllowedProcesses:   cfg.Rules.Network.AllowedProcesses,
-		AllowedCIDRs:       cidrs,
-		AllowMetadata:      allowMetadata,
-		AllowedIPv6s:       ipv6s,
-		AllowedDNSServers:  allowedDNSServers,
+		AllowedHosts:         dedup(hosts),
+		AllowedIPs:           ips,
+		AllowGithubMeta:      allowGithubMeta,
+		AllowLocalIPRanges:   allowLocalRanges,
+		AllowedProcesses:     cfg.Rules.Network.AllowedProcesses,
+		AllowedCIDRs:         cidrs,
+		AllowMetadata:        allowMetadata,
+		AllowedIPv6s:         ipv6s,
+		AllowedDNSServers:    allowedDNSServers,
 		ProcessProfiles:      processProfiles,
 		BlockedProcessChains: blockedChains,
+		BlockedExecutables:   cfg.Rules.Process.BlockedExecutables,
+		ProtectedPaths:       cfg.Rules.File.ProtectedPaths,
 	}
 
 	dataBytes, err := json.Marshal(data)
