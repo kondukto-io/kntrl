@@ -24,6 +24,13 @@ process_allowed if {
 	input.task_name == data.allowed_processes[_]
 }
 
+# Process is allowed if the destination is an explicitly allowed host.
+# This matches the BPF cgroup filter: IPs resolved from allowed_hosts are
+# pre-populated in the kernel allowlist for ALL processes, so OPA must agree.
+process_allowed if {
+	data.kntrl.network["is_allowed_hosts"].policy
+}
+
 # Final policy: network and process must be allowed, ancestry must not be denied
 policy if {
 	network_allowed

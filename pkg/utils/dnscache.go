@@ -92,6 +92,33 @@ func CacheDNSDomain(domain string) {
 	}
 }
 
+// CacheSNI populates the forward DNS cache with an IP→SNI mapping.
+// Called when a TLS ClientHello SNI is observed from BPF cgroup egress.
+// This provides a second chance to resolve the real domain when the
+// forward DNS cache was not populated in time from DNS events.
+func CacheSNI(ipStr, sni string) {
+	fwdDNSCacheMu.Lock()
+	defer fwdDNSCacheMu.Unlock()
+
+	entry, ok := fwdDNSCache[ipStr]
+	if ok && time.Now().Before(entry.expiresAt) {
+		// Append SNI if not already present
+		for _, n := range entry.names {
+			if n == sni {
+				return
+			}
+		}
+		entry.names = append(entry.names, sni)
+		entry.expiresAt = time.Now().Add(dnsCacheTTL)
+		fwdDNSCache[ipStr] = entry
+	} else {
+		fwdDNSCache[ipStr] = dnsCacheEntry{
+			names:     []string{sni},
+			expiresAt: time.Now().Add(dnsCacheTTL),
+		}
+	}
+}
+
 // LookupAndTrimCached performs a cached, timeout-bounded reverse DNS lookup.
 // It first checks the forward DNS cache (populated from BPF DNS events),
 // then falls back to reverse DNS. Results are cached for 5 minutes.

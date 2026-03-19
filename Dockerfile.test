@@ -1,5 +1,5 @@
 # Stage 1: Build environment with eBPF toolchain
-FROM golang:1.21-bookworm AS builder
+FROM golang:1.24-bookworm AS builder
 
 # Install eBPF build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \

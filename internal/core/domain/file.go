@@ -28,4 +28,5 @@ const (
 	FileOpOpen   = 0
 	FileOpRename = 1
 	FileOpUnlink = 2
+	FileOpAccess = 3
 )

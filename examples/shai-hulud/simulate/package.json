@@ -1,0 +1,8 @@
+{
+  "name": "shai-hulud-simulate",
+  "version": "1.0.0",
+  "description": "Simulates the Shai-Hulud npm worm attack chain — triggers kntrl detections at every stage",
+  "scripts": {
+    "postinstall": "node index.js"
+  }
+}

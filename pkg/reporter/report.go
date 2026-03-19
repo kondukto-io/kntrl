@@ -392,6 +392,7 @@ func (r *Reporter) printProcessTree() {
 		ppid    uint32
 		comm    string
 		args    string
+		policy  string
 		hasFork bool
 	}
 
@@ -419,9 +420,12 @@ func (r *Reporter) printProcessTree() {
 				n.comm = ev.Comm
 			}
 		} else {
-			// Exec provides display data (args, comm)
+			// Exec provides display data (args, comm, policy)
 			n.comm = ev.Comm
 			n.args = ev.Args
+			if ev.Policy != "" {
+				n.policy = ev.Policy
+			}
 			// Only use exec's ppid if we never got a fork event
 			if !n.hasFork {
 				n.ppid = ev.ParentPID
@@ -469,7 +473,12 @@ func (r *Reporter) printProcessTree() {
 			display = n.comm
 		}
 
-		fmt.Printf("%s%s[%d] %s\n", prefix, connector, n.pid, display)
+		policyTag := ""
+		if n.policy == "block" {
+			policyTag = " [BLOCKED]"
+		}
+
+		fmt.Printf("%s%s[%d] %s%s\n", prefix, connector, n.pid, display, policyTag)
 
 		kids := children[pid]
 		sort.Slice(kids, func(i, j int) bool { return kids[i] < kids[j] })

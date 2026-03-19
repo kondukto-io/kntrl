@@ -1,0 +1,173 @@
+##
+## kntrl policy: Shai-Hulud npm worm — detection & prevention (Linux)
+##
+## Covers Shai-Hulud v1 (Sept 2025) and v2 "The Second Coming" (Nov 2025).
+## Pair with shai_hulud.rego in this directory for advanced OPA rules.
+##
+## Usage:
+##   sudo kntrl trace --rules-dir ./examples/shai-hulud/
+##
+## References:
+##   https://unit42.paloaltonetworks.com/npm-supply-chain-attack/
+##   https://securitylabs.datadoghq.com/articles/shai-hulud-2.0-npm-worm/
+##   https://www.reversinglabs.com/blog/shai-hulud-worm-npm
+##
+version: "1"
+mode: trace
+rules:
+  # ─────────────────────────────────────────────────
+  # NETWORK
+  # ─────────────────────────────────────────────────
+  network:
+    allowed_hosts:
+      - "registry.npmjs.org"
+      - ".npmjs.org"
+      - ".npmjs.com"
+      - "github.com"
+      - ".githubusercontent.com"
+    allowed_ips:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+    allow_local_ranges: true
+    allow_github_meta: true
+    # Block cloud metadata — worm steals instance credentials
+    allow_metadata: false
+    allowed_processes:
+      - "npm"
+      - "node"
+      - "git"
+    # Lock each process to only the hosts it legitimately needs
+    profiles:
+      - process: "npm"
+        allowed_hosts:
+          - "registry.npmjs.org"
+          - ".npmjs.org"
+          - ".npmjs.com"
+      - process: "node"
+        allowed_hosts:
+          - "registry.npmjs.org"
+          - ".npmjs.org"
+          - ".npmjs.com"
+
+  # ─────────────────────────────────────────────────
+  # PROCESS — kernel-level (eBPF) enforcement
+  # ─────────────────────────────────────────────────
+  process:
+    enabled: true
+    blocked_chains:
+      # --- Network downloaders from npm ---
+      - process: "curl"
+        ancestors: ["npm"]
+      - process: "curl"
+        ancestors: ["node"]
+      - process: "wget"
+        ancestors: ["npm"]
+      - process: "wget"
+        ancestors: ["node"]
+
+      # --- Bun runtime (Shai-Hulud 2.0 evasion technique) ---
+      - process: "bun"
+        ancestors: ["npm"]
+      - process: "bun"
+        ancestors: ["node"]
+
+      # --- GitHub Actions runner install ---
+      - process: "config.sh"
+        ancestors: ["npm"]
+      - process: "config.sh"
+        ancestors: ["node"]
+
+      # --- Dead man's switch: destructive commands ---
+      - process: "shred"
+        ancestors: ["npm"]
+      - process: "shred"
+        ancestors: ["node"]
+      - process: "rm"
+        ancestors: ["npm"]
+      - process: "xargs"
+        ancestors: ["npm"]
+
+      # --- Shells from npm (all worm stages route through these) ---
+      - process: "bash"
+        ancestors: ["npm"]
+      - process: "sh"
+        ancestors: ["npm"]
+      - process: "bash"
+        ancestors: ["node"]
+      - process: "sh"
+        ancestors: ["node"]
+
+      # --- Scripting interpreters from npm ---
+      - process: "python"
+        ancestors: ["npm"]
+      - process: "python3"
+        ancestors: ["npm"]
+      - process: "perl"
+        ancestors: ["npm"]
+      - process: "ruby"
+        ancestors: ["npm"]
+
+    # Kernel-level SIGKILL — no ancestry check, instant kill at execve
+    blocked_executables:
+      # Reverse shell / reconnaissance
+      - "nc"
+      - "ncat"
+      - "nmap"
+      - "socat"
+      # Secret scanner abused by worm
+      - "trufflehog"
+      # Destructive tools (dead man's switch)
+      - "shred"
+
+  # ─────────────────────────────────────────────────
+  # DNS
+  # ─────────────────────────────────────────────────
+  dns:
+    allowed_servers:
+      - "8.8.8.8"
+      - "8.8.4.4"
+      - "1.1.1.1"
+
+  # ─────────────────────────────────────────────────
+  # FILE — protect credentials the worm steals
+  # ─────────────────────────────────────────────────
+  file:
+    enabled: true
+    monitored_paths:
+      # npm token — primary propagation credential
+      - "/.npmrc"
+      # Cloud provider credentials
+      - "/.config/gcloud/"
+      - "/.aws/"
+      - "/.azure/"
+      # SSH keys for lateral movement
+      - "/.ssh/"
+      # Kubernetes secrets
+      - "/var/run/secrets/"
+      - "/.kube/config"
+      # GitHub CLI credentials
+      - "/.config/gh/"
+    protected_paths:
+      - "/etc/sudoers"
+      - "/etc/sudoers.d/"
+      - "/etc/passwd"
+      - "/etc/shadow"
+      - "/root/.ssh/authorized_keys"
+    monitored_env_vars:
+      - "NPM_TOKEN"
+      - "NPM_AUTH_TOKEN"
+      - "NODE_AUTH_TOKEN"
+      - "GITHUB_TOKEN"
+      - "GH_TOKEN"
+      - "AWS_ACCESS_KEY_ID"
+      - "AWS_SECRET_ACCESS_KEY"
+      - "AWS_SESSION_TOKEN"
+      - "AZURE_CLIENT_SECRET"
+      - "AZURE_TENANT_ID"
+      - "GOOGLE_APPLICATION_CREDENTIALS"
+      - "DOCKER_AUTH_CONFIG"
+      - "CI_JOB_TOKEN"
+      - "GITLAB_TOKEN"
+      - "RUNNER_TOKEN"
+
+webhooks: []
