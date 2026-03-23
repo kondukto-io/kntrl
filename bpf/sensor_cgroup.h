@@ -5,6 +5,19 @@
  * Cgroup Egress Filter
  * ======================== */
 
+/* Extract the destination port from the L4 header (TCP or UDP).
+ * Returns 0 if the protocol is not TCP/UDP or on parse failure. */
+static __always_inline __u16 get_dst_port(struct __sk_buff *skb, struct iphdr *iph) {
+	__u32 l4_off = iph->ihl * 4;
+	if (iph->protocol == IPPROTO_TCP || iph->protocol == IPPROTO_UDP) {
+		__u16 dport;
+		if (bpf_skb_load_bytes(skb, l4_off + 2, &dport, sizeof(dport)) < 0)
+			return 0;
+		return __bpf_ntohs(dport);
+	}
+	return 0;
+}
+
 static __always_inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 	bool block = true;
 
@@ -12,6 +25,13 @@ static __always_inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 	bpf_skb_load_bytes(skb, 0, &iph, sizeof(struct iphdr));
 
 	if (iph.version == 4) {
+		/* Always allow DNS traffic (port 53) — DNS is monitored
+		 * separately by the DNS event hooks, and blocking DNS here
+		 * would prevent all name resolution from working. */
+		__u16 dport = get_dst_port(skb, &iph);
+		if (dport == 53)
+			return true;
+
 		bool pass = bpf_map_lookup_elem(&allowed_ip_map, &iph.saddr) || bpf_map_lookup_elem(&allowed_ip_map, &iph.daddr);
 
 		__u32 key = 0;

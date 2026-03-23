@@ -88,6 +88,15 @@ func (rt *tracerRuntime) dnsEventLoop(reader *ringbuf.Reader) {
 		// which returns CDN hostnames instead of the original domain.
 		if reportEvent.IsResponse && reportEvent.QueryDomain != "" {
 			utils.CacheDNSDomain(reportEvent.QueryDomain)
+
+			// Proactively update the BPF allowed IP maps when a DNS response
+			// is observed for an allowed host. This prevents a race condition
+			// where the cgroup SKB filter drops the first SYN packet because
+			// the runtime-resolved IP differs from the startup-resolved IP
+			// (common with CDN/load-balanced hosts like github.com).
+			if rt.isAllowedHost(qname) {
+				rt.addResolvedIPsToMaps(qname)
+			}
 		}
 
 		rt.report.WriteDNSEvent(reportEvent)

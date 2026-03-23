@@ -202,9 +202,15 @@ func Run(cmd cobra.Command) error {
 	}
 
 	// --- Attach eBPF programs to kernel hooks ---
-	if err := attachPrograms(ebpfClient); err != nil {
+	cleanups, err := attachPrograms(ebpfClient)
+	if err != nil {
 		return err
 	}
+	defer func() {
+		for _, fn := range cleanups {
+			fn()
+		}
+	}()
 
 	// --- Runtime state ---
 	var policyPtr atomic.Pointer[policy.Policy]
@@ -482,7 +488,7 @@ func initReporter(cmd *cobra.Command) *reporter.Reporter {
 // attachPrograms iterates over all eBPF programs in the loaded collection and
 // attaches each one to its appropriate kernel hook (kprobe, tracepoint, tracing,
 // or cgroup). Deferred cleanup ensures hooks are detached on shutdown.
-func attachPrograms(ebpfClient *ebpfman.EBPF) error {
+func attachPrograms(ebpfClient *ebpfman.EBPF) (cleanups []func(), retErr error) {
 	for name, spec := range ebpfClient.Spec.Programs {
 		prg := ebpfClient.Collection.Programs[name]
 		logger.Log.WithFields(logrus.Fields{
@@ -495,17 +501,17 @@ func attachPrograms(ebpfClient *ebpfman.EBPF) error {
 			logger.Log.Infof("linking Kprobe [%s]", utils.ParseProgramName(prg))
 			l, err := link.Kprobe(spec.AttachTo, prg, nil)
 			if err != nil {
-				return err
+				return cleanups, err
 			}
-			defer l.Close()
+			cleanups = append(cleanups, func() { l.Close() })
 
 		case ebpf.Tracing:
 			logger.Log.Infof("linking tracing [%s]", utils.ParseProgramName(prg))
 			l, err := link.AttachTracing(link.TracingOptions{Program: prg})
 			if err != nil {
-				return err
+				return cleanups, err
 			}
-			defer l.Close()
+			cleanups = append(cleanups, func() { l.Close() })
 
 		case ebpf.TracePoint:
 			logger.Log.Infof("linking tracepoint [%s]", utils.ParseProgramName(prg))
@@ -516,15 +522,15 @@ func attachPrograms(ebpfClient *ebpfman.EBPF) error {
 			}
 			l, err := link.Tracepoint(tp[0], tp[1], prg, nil)
 			if err != nil {
-				return err
+				return cleanups, err
 			}
-			defer l.Close()
+			cleanups = append(cleanups, func() { l.Close() })
 
 		case ebpf.CGroupSKB:
 			logger.Log.Infof("linking CGroupSKB [%s]", utils.ParseProgramName(prg))
 			cgroup, err := os.Open(rootCgroup)
 			if err != nil {
-				return err
+				return cleanups, err
 			}
 			l, err := link.AttachCgroup(link.CgroupOptions{
 				Path:    cgroup.Name(),
@@ -532,16 +538,16 @@ func attachPrograms(ebpfClient *ebpfman.EBPF) error {
 				Program: prg,
 			})
 			if err != nil {
-				return err
+				cgroup.Close()
+				return cleanups, err
 			}
-			defer l.Close()
-			defer cgroup.Close()
+			cleanups = append(cleanups, func() { l.Close(); cgroup.Close() })
 
 		default:
 			logger.Log.Warnf("ebpf program unrecognized: %v", prg)
 		}
 	}
-	return nil
+	return cleanups, nil
 }
 
 // handleSIGHUP listens for SIGHUP signals and performs a hot-reload of the

@@ -141,6 +141,7 @@ func (r *Reporter) WriteEvent(event domain.ReportEvent) {
 	if _, err = r.writer.WriteString(string(eventData) + "\n"); err != nil {
 		logger.Log.Errorf("failed to write event to file: %s %v", r.file.Name(), err)
 	}
+	r.writer.Flush()
 }
 
 // WriteFileEvent adds a file access event to the report
@@ -159,6 +160,7 @@ func (r *Reporter) WriteFileEvent(event domain.FileReportEvent) {
 	if _, err = r.writer.WriteString(string(eventData) + "\n"); err != nil {
 		logger.Log.Errorf("failed to write file event to file: %s %v", r.file.Name(), err)
 	}
+	r.writer.Flush()
 }
 
 // WriteDNSEvent adds a DNS event to the report
@@ -177,6 +179,7 @@ func (r *Reporter) WriteDNSEvent(event domain.DNSReportEvent) {
 	if _, err = r.writer.WriteString(string(eventData) + "\n"); err != nil {
 		logger.Log.Errorf("failed to write dns event to file: %s %v", r.file.Name(), err)
 	}
+	r.writer.Flush()
 }
 
 // WriteProcessEvent adds a process event to the report
@@ -195,6 +198,7 @@ func (r *Reporter) WriteProcessEvent(event domain.ProcessReportEvent) {
 	if _, err = r.writer.WriteString(string(eventData) + "\n"); err != nil {
 		logger.Log.Errorf("failed to write process event to file: %s %v", r.file.Name(), err)
 	}
+	r.writer.Flush()
 }
 
 // Close flushes the buffered writer and closes the report file.
