@@ -16,4 +16,36 @@ type Data struct {
 	AllowGithubMeta bool `json:"allow_github_meta"`
 	// Allow local IP addresses.
 	AllowLocalIPRanges bool `json:"allow_local_ip_ranges"`
+	// Allowed process names. If empty, all processes are allowed.
+	AllowedProcesses []string `json:"allowed_processes,omitempty"`
+	// Allowed CIDR ranges.
+	AllowedCIDRs []string `json:"allowed_cidrs,omitempty"`
+	// AllowMetadata controls access to cloud metadata endpoints
+	// (169.254.169.254 for AWS/GCP, 168.63.129.16 for Azure).
+	AllowMetadata bool `json:"allow_metadata"`
+	// AllowedIPv6s are allowed IPv6 addresses.
+	AllowedIPv6s []net.IP `json:"allowed_ipv6s,omitempty"`
+	// AllowedDNSServers are the allowed DNS server IPs.
+	AllowedDNSServers []net.IP `json:"allowed_dns_servers,omitempty"`
+	// ProcessProfiles are per-process network access profiles.
+	ProcessProfiles []ProcessProfileData `json:"process_profiles,omitempty"`
+	// BlockedProcessChains are process ancestry chains to deny.
+	BlockedProcessChains []BlockedProcessChain `json:"blocked_process_chains,omitempty"`
+	// BlockedExecutables are executable names to kill unconditionally at BPF level.
+	BlockedExecutables []string `json:"blocked_executables,omitempty"`
+	// ProtectedPaths are file paths to protect from writes/renames/deletes.
+	ProtectedPaths []string `json:"protected_paths,omitempty"`
+}
+
+// BlockedProcessChain represents a process ancestry chain to deny in OPA.
+type BlockedProcessChain struct {
+	Process   string   `json:"process"`
+	Ancestors []string `json:"ancestors"`
+}
+
+// ProcessProfileData represents a per-process network access profile for OPA.
+type ProcessProfileData struct {
+	Process      string   `json:"process"`
+	AllowedHosts []string `json:"allowed_hosts"`
+	AllowedCIDRs []string `json:"allowed_cidrs,omitempty"`
 }

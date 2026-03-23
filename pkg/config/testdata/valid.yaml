@@ -1,0 +1,15 @@
+version: "1"
+mode: trace
+rules:
+  network:
+    allowed_hosts:
+      - "github.com"
+      - ".amazonaws.com"
+    allowed_ips:
+      - "1.2.3.4"
+      - "10.0.0.0/8"
+    allow_local_ranges: true
+    allow_github_meta: false
+    allowed_processes:
+      - "curl"
+      - "git"

@@ -2,7 +2,6 @@ package utils
 
 import (
 	"encoding/binary"
-	"fmt"
 	"net"
 	"os/user"
 	"regexp"
@@ -55,17 +54,14 @@ func GetProtocol(p uint8) string {
 	return "-"
 }
 
-// trim NULL bytes (in the event.Comm)
+// TrimNullBytes extracts the C-string from a fixed-size byte array by slicing to the first null byte.
 func TrimNullBytes(p [16]uint8) string {
-	var comm string
-	for _, v := range p {
+	for i, v := range p {
 		if v == 0 {
-			continue
+			return string(p[:i])
 		}
-		comm = fmt.Sprintf("%s%s", comm, string(v))
 	}
-
-	return comm
+	return string(p[:])
 }
 
 // lookup IP address and trim suffix (".")
@@ -88,5 +84,12 @@ func IntToIP(ipNum uint32) net.IP {
 	ip := make(net.IP, 4)
 	//binary.BigEndian.PutUint32(ip, ipNum)
 	binary.LittleEndian.PutUint32(ip, ipNum)
+	return ip
+}
+
+// BytesToIPv6 converts a 16-byte array to an IPv6 net.IP
+func BytesToIPv6(addr [16]byte) net.IP {
+	ip := make(net.IP, 16)
+	copy(ip, addr[:])
 	return ip
 }

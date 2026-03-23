@@ -1,0 +1,24 @@
+version: "1"
+mode: block
+rules:
+  network:
+    allowed_hosts:
+      - ".github.com"
+      - "registry.npmjs.org"
+    allow_local_ranges: true
+    allow_github_meta: false
+  process:
+    enabled: true
+    blocked_chains:
+      # Block curl when spawned from sh (e.g. shell scripts)
+      - process: "curl"
+        ancestors: ["sh"]
+      # Block wget when spawned from sh
+      - process: "wget"
+        ancestors: ["sh"]
+      # Block curl when npm -> sh -> curl chain
+      - process: "curl"
+        ancestors: ["npm", "sh"]
+      # Block wget when npm -> sh -> wget chain
+      - process: "wget"
+        ancestors: ["npm", "sh"]

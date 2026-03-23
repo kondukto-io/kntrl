@@ -37,10 +37,17 @@ func initTracerCommand() *cobra.Command {
 	tracerCMD.Flags().String("mode", "monitor", "trace || monitor")
 	tracerCMD.Flags().Bool("allow-local-ranges", true, "allows access to local IP ranges")
 	tracerCMD.Flags().Bool("allow-github-meta", false, "allows access to GitHub meta IP ranges (https://api.github.com/meta)")
+	tracerCMD.Flags().Bool("allow-metadata", false, "allows access to cloud metadata endpoints (169.254.169.254, 168.63.129.16)")
+	tracerCMD.Flags().Bool("monitor-processes", true, "enable process monitoring (fork/exec tracking)")
 	tracerCMD.Flags().Bool("daemonize", false, "daemonize process")
 	tracerCMD.Flags().String("allowed-hosts", "", "enter allowed hostnames (example.com, .github.com)")
 	tracerCMD.Flags().String("allowed-ips", "", "enter allowed IP addresses")
 	tracerCMD.Flags().StringP("output-file-name", "o", "/tmp/kntrl.out", "output file name")
+	tracerCMD.Flags().String("rules-file", "", "path to a YAML rules file")
+	tracerCMD.Flags().String("rules-dir", "", "path to a directory of .yaml and/or .rego rule files")
+	tracerCMD.Flags().Bool("pretty", false, "pretty-print process events as a tree")
+	tracerCMD.Flags().String("api-key", "", "API key for cloud report upload")
+	tracerCMD.Flags().String("api-url", "", "API URL for cloud report upload")
 
 	return tracerCMD
 }
@@ -59,7 +66,6 @@ func daemonize(args []string) error {
 		filteredArgs = append(filteredArgs, args[i])
 	}
 
-	// TODO: trim args for command injection
 	cmd := exec.Command(os.Args[0], filteredArgs...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil

@@ -1,0 +1,253 @@
+##
+## kntrl policy: GitHub Actions — npm + pip supply chain protection
+##
+## Designed for CI/CD runners that run `npm install` and `pip install`.
+## Allows only the network destinations those package managers need and
+## blocks suspicious process chains that indicate supply chain attacks
+## (e.g. a postinstall script spawning curl/wget to exfiltrate secrets).
+##
+## Usage (in a GitHub Actions step):
+##   sudo kntrl tracer --mode trace --rules-dir ./examples/github-actions/
+##
+## What this policy does:
+##   1. Allows GitHub Actions infrastructure IPs (via allow_github_meta)
+##   2. Allows npm registry, PyPI, and common CDN hosts
+##   3. Blocks network downloaders (curl, wget) spawned from npm/pip/node
+##   4. Blocks reverse shells and recon tools (nc, nmap, socat)
+##   5. Protects sensitive files (SSH keys, cloud creds, tokens)
+##   6. Monitors environment variables commonly targeted by supply chain attacks
+##
+version: "1"
+mode: trace
+
+rules:
+  # ─────────────────────────────────────────────────
+  # NETWORK — allow only what npm + pip legitimately need
+  # ─────────────────────────────────────────────────
+  network:
+    allowed_hosts:
+      # --- npm registry ---
+      - "registry.npmjs.org"
+      - ".npmjs.org"
+      - ".npmjs.com"
+
+      # --- PyPI registry ---
+      - "pypi.org"
+      - "files.pythonhosted.org"
+      - ".pypi.org"
+
+      # --- GitHub (Actions checkout, git clone, releases) ---
+      - "github.com"
+      - ".github.com"
+      - ".githubusercontent.com"
+      - ".githubassets.com"
+      - ".actions.githubusercontent.com"
+
+      # --- Common CDN/infrastructure used by packages ---
+      - ".cloudflare.com"
+      - ".fastly.net"
+
+    allowed_ips:
+      # Runner-internal and Docker network ranges
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+
+    # Allow private/loopback ranges (needed for local services in CI)
+    allow_local_ranges: true
+
+    # Dynamically fetch and allow GitHub's infrastructure IP ranges
+    # from https://api.github.com/meta — this covers Actions runner
+    # egress, Git operations, package hosting, and API endpoints.
+    allow_github_meta: true
+
+    # Block access to cloud metadata endpoints (169.254.169.254, etc.)
+    # to prevent credential theft from the runner's cloud instance.
+    allow_metadata: false
+
+    # Per-process network restrictions: lock each tool to only
+    # the registries it legitimately needs.
+    profiles:
+      - process: "npm"
+        allowed_hosts:
+          - "registry.npmjs.org"
+          - ".npmjs.org"
+          - ".npmjs.com"
+      - process: "node"
+        allowed_hosts:
+          - "registry.npmjs.org"
+          - ".npmjs.org"
+          - ".npmjs.com"
+      - process: "pip"
+        allowed_hosts:
+          - "pypi.org"
+          - "files.pythonhosted.org"
+          - ".pypi.org"
+      - process: "pip3"
+        allowed_hosts:
+          - "pypi.org"
+          - "files.pythonhosted.org"
+          - ".pypi.org"
+      - process: "python"
+        allowed_hosts:
+          - "pypi.org"
+          - "files.pythonhosted.org"
+          - ".pypi.org"
+      - process: "python3"
+        allowed_hosts:
+          - "pypi.org"
+          - "files.pythonhosted.org"
+          - ".pypi.org"
+
+  # ─────────────────────────────────────────────────
+  # PROCESS — block suspicious execution chains
+  # ─────────────────────────────────────────────────
+  process:
+    enabled: true
+
+    blocked_chains:
+      # --- Network downloaders from npm ---
+      # A legit npm postinstall script should never need curl/wget.
+      - process: "curl"
+        ancestors: ["npm"]
+      - process: "curl"
+        ancestors: ["node"]
+      - process: "wget"
+        ancestors: ["npm"]
+      - process: "wget"
+        ancestors: ["node"]
+
+      # --- Network downloaders from pip ---
+      # pip install should not spawn curl/wget.
+      - process: "curl"
+        ancestors: ["pip"]
+      - process: "curl"
+        ancestors: ["pip3"]
+      - process: "wget"
+        ancestors: ["pip"]
+      - process: "wget"
+        ancestors: ["pip3"]
+
+      # --- Shells from package managers ---
+      # Blocks postinstall scripts from spawning interactive shells.
+      - process: "bash"
+        ancestors: ["npm"]
+      - process: "sh"
+        ancestors: ["npm"]
+      - process: "bash"
+        ancestors: ["node"]
+      - process: "sh"
+        ancestors: ["node"]
+
+      # --- Scripting interpreters from npm ---
+      # Prevents npm postinstall from launching python/perl/ruby
+      # (common in supply chain attacks for obfuscation).
+      - process: "python"
+        ancestors: ["npm"]
+      - process: "python3"
+        ancestors: ["npm"]
+      - process: "perl"
+        ancestors: ["npm"]
+      - process: "ruby"
+        ancestors: ["npm"]
+
+      # --- Reverse shell / tunneling from package managers ---
+      - process: "nc"
+        ancestors: ["npm"]
+      - process: "nc"
+        ancestors: ["pip"]
+      - process: "ncat"
+        ancestors: ["npm"]
+      - process: "ncat"
+        ancestors: ["pip"]
+      - process: "socat"
+        ancestors: ["npm"]
+      - process: "socat"
+        ancestors: ["pip"]
+
+    # Kernel-level SIGKILL — these are always dangerous in CI,
+    # regardless of which process spawned them.
+    blocked_executables:
+      - "nc"
+      - "ncat"
+      - "nmap"
+      - "socat"
+      - "trufflehog"
+
+  # ─────────────────────────────────────────────────
+  # DNS — restrict to well-known resolvers
+  # ─────────────────────────────────────────────────
+  dns:
+    allowed_servers:
+      - "8.8.8.8"
+      - "8.8.4.4"
+      - "1.1.1.1"
+      - "1.0.0.1"
+
+  # ─────────────────────────────────────────────────
+  # FILE — protect secrets and credentials
+  # ─────────────────────────────────────────────────
+  file:
+    enabled: true
+    monitored_paths:
+      # npm / PyPI tokens
+      - "/.npmrc"
+      - "/.pypirc"
+      - "/pip.conf"
+
+      # SSH keys
+      - "/.ssh/"
+
+      # Cloud provider credentials
+      - "/.aws/"
+      - "/.azure/"
+      - "/.config/gcloud/"
+
+      # Kubernetes secrets
+      - "/var/run/secrets/"
+      - "/.kube/config"
+
+      # GitHub CLI credentials
+      - "/.config/gh/"
+
+    protected_paths:
+      - "/etc/sudoers"
+      - "/etc/sudoers.d/"
+      - "/etc/passwd"
+      - "/etc/shadow"
+      - "/root/.ssh/authorized_keys"
+
+    monitored_env_vars:
+      # npm / Node
+      - "NPM_TOKEN"
+      - "NPM_AUTH_TOKEN"
+      - "NODE_AUTH_TOKEN"
+
+      # PyPI
+      - "TWINE_PASSWORD"
+      - "PYPI_TOKEN"
+
+      # GitHub
+      - "GITHUB_TOKEN"
+      - "GH_TOKEN"
+
+      # AWS
+      - "AWS_ACCESS_KEY_ID"
+      - "AWS_SECRET_ACCESS_KEY"
+      - "AWS_SESSION_TOKEN"
+
+      # Azure
+      - "AZURE_CLIENT_SECRET"
+      - "AZURE_TENANT_ID"
+
+      # GCP
+      - "GOOGLE_APPLICATION_CREDENTIALS"
+
+      # Docker
+      - "DOCKER_AUTH_CONFIG"
+
+      # CI
+      - "CI_JOB_TOKEN"
+      - "RUNNER_TOKEN"
+
+webhooks: []

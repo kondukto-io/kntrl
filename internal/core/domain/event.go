@@ -18,6 +18,13 @@ type IP4Event struct {
 	// Sport uint16
 }
 
+// IP6Event represents a socket connect event from AF_INET6
+type IP6Event struct {
+	Event
+	Daddr [16]byte // IPv6 destination address
+	Dport uint16   // Destination port
+}
+
 // ReportEvent represents a report event
 type ReportEvent struct {
 	ProcessID          uint32   `json:"pid"`
@@ -27,6 +34,8 @@ type ReportEvent struct {
 	DestinationPort    uint16   `json:"dport"`
 	Domains            []string `json:"domains"`
 	Policy             string   `json:"policy"`
+	SNI                string   `json:"sni,omitempty"`
+	Ancestors          []string `json:"ancestors,omitempty"`
 }
 
 const (
@@ -42,3 +51,13 @@ const (
 	EventProtocolTCP = "tcp"
 	EventProtocolUDP = "udp"
 )
+
+// SummaryCounts holds aggregate event counts for a session summary.
+type SummaryCounts struct {
+	TotalNetwork int `json:"total_network"`
+	TotalProcess int `json:"total_process"`
+	TotalDNS     int `json:"total_dns"`
+	TotalFile    int `json:"total_file"`
+	Blocked      int `json:"blocked"`
+	Passed       int `json:"passed"`
+}

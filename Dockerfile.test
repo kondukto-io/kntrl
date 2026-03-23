@@ -1,0 +1,46 @@
+# Stage 1: Build environment with eBPF toolchain
+FROM golang:1.24-bookworm AS builder
+
+# Install eBPF build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    clang-16 \
+    llvm-16 \
+    libelf-dev \
+    libc6-dev \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OPA CLI for Rego tests
+RUN ARCH=$(dpkg --print-architecture) && \
+    wget -q -O /usr/local/bin/opa https://openpolicyagent.org/downloads/v0.68.0/opa_linux_${ARCH}_static \
+    && chmod +x /usr/local/bin/opa
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Download GitHub meta for OPA bundle
+RUN wget -q --timeout=30 --tries=3 https://api.github.com/meta -O ./bundle/assets/github/data.json || true
+
+# Compile eBPF C code for x86_64.
+ENV BPF_CLANG=clang-16
+ENV BPF_CFLAGS="-O2 -g -Wall -Werror"
+ENV BPF_HEADERS=/src/bpf/headers
+RUN GOARCH=amd64 go generate ./...
+
+# Build the binary for x86_64 Linux
+RUN CGO_ENABLED=0 GOARCH=amd64 go build -o /src/kntrl .
+
+# Stage 2: Test runner
+FROM builder AS test-runner
+
+LABEL purpose="kntrl-test"
+
+WORKDIR /src
+
+ENTRYPOINT ["/bin/bash", "-c"]
+CMD ["make test-all-docker"]

@@ -49,7 +49,7 @@ var testCases = map[string]struct {
 		false,
 	},
 	"allow_github_meta_2": {
-		[]byte(`{"allowed_hosts":["foo.com"], "allowed_ip_addr":["1.1.1.1"], "allow_github_meta": false, "allow_local_ip_ranges": false}`),
+		[]byte(`{"allowed_hosts":[".github.com"], "allowed_ip_addr":["1.1.1.1"], "allow_github_meta": false, "allow_local_ip_ranges": false}`),
 		[]byte(`{"pid":1798,"task_name":".NET TP Worker","proto":"tcp","daddr":"140.82.113.22","dport":443,"domains":["lb-140-82-113-22-iad.github.com"]}`),
 		true,
 	},

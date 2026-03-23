@@ -1,0 +1,67 @@
+version: "1"
+mode: trace
+rules:
+  network:
+    allowed_hosts:
+      - "github.com"
+      - ".githubusercontent.com"
+      - ".amazonaws.com"
+      - ".docker.io"
+      - ".docker.com"
+    allowed_ips:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+    allow_local_ranges: true
+    allow_github_meta: true
+    allow_metadata: false
+    allowed_processes:
+      - "curl"
+      - "git"
+      - "wget"
+      - "docker"
+      - "npm"
+      - "pip"
+    profiles:
+      - process: "curl"
+        allowed_hosts:
+          - "github.com"
+          - ".amazonaws.com"
+      - process: "npm"
+        allowed_hosts:
+          - "registry.npmjs.org"
+      - process: "pip"
+        allowed_hosts:
+          - "pypi.org"
+          - "files.pythonhosted.org"
+  process:
+    enabled: true
+    blocked_chains:
+      - process: "curl"
+        ancestors: ["npm"]
+      - process: "wget"
+        ancestors: ["pip"]
+    blocked_executables:
+      - "nc"
+      - "ncat"
+      - "socat"
+      - "trufflehog"
+  dns:
+    allowed_servers:
+      - "8.8.8.8"
+      - "8.8.4.4"
+  file:
+    enabled: true
+    monitored_paths:
+      - "/etc/shadow"
+      - "/root/.ssh/"
+      - "/var/run/secrets/"
+    protected_paths:
+      - "/etc/sudoers"
+      - "/etc/sudoers.d/"
+      - "/root/.ssh/authorized_keys"
+      - "/home/"
+      - "/etc/passwd"
+    monitored_env_vars:
+      - "GITHUB_TOKEN"
+      - "AWS_SECRET_ACCESS_KEY"
+webhooks: []

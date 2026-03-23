@@ -1,0 +1,22 @@
+version: "1"
+mode: trace
+rules:
+  network:
+    allowed_hosts:
+      - "github.com"
+      - ".google.com"
+    allowed_ips:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+    allow_local_ranges: true
+    allow_github_meta: false
+    allow_metadata: false
+  process:
+    enabled: true
+    blocked_chains:
+      # Block curl when spawned from sh (e.g. a shell script doing curl)
+      - process: "curl"
+        ancestors: ["sh"]
+      # Block wget when spawned from sh
+      - process: "wget"
+        ancestors: ["sh"]

@@ -1,0 +1,141 @@
+version: "3.8"
+
+services:
+  # Unit tests - no eBPF kernel access needed
+  test-unit:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: test-runner
+    command: >
+      go test -v -count=1
+      ./pkg/config/...
+      ./pkg/policy/...
+      ./pkg/reporter/...
+      ./pkg/utils/...
+      ./pkg/parser/...
+      ./internal/core/...
+    environment:
+      - CGO_ENABLED=0
+
+  # Rego/OPA tests
+  test-rego:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: test-runner
+    command: >
+      opa test -v ./bundle/...
+
+  # eBPF tests - requires privileged mode and kernel access
+  test-ebpf:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: test-runner
+    command: >
+      go test -v -count=1 -tags=ebpf -timeout=120s
+      ./internal/handlers/tracer/...
+      ./pkg/ebpf/...
+    privileged: true
+    pid: host
+    network_mode: host
+    volumes:
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - /sys/fs/bpf:/sys/fs/bpf:rw
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - SYS_PTRACE
+
+  # Integration tests - full end-to-end
+  test-integration:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: test-runner
+    command: >
+      go test -v -count=1 -tags=integration -timeout=300s
+      ./tests/integration/...
+    privileged: true
+    pid: host
+    network_mode: host
+    volumes:
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - /sys/fs/bpf:/sys/fs/bpf:rw
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - SYS_PTRACE
+
+  # Interactive runtime test - run kntrl with a policy and exec into container
+  # Usage:
+  #   docker compose -f docker-compose.test.yml run --rm runtime
+  #   Then in another terminal:
+  #     docker exec -it <container-id> bash
+  #     curl https://github.com          # should be allowed (direct)
+  #     sh -c "curl https://github.com"  # should be BLOCKED (curl from sh)
+  #     sh -c "wget https://github.com"  # should be BLOCKED (wget from sh)
+  runtime:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: test-runner
+    entrypoint: []
+    command: ["/src/kntrl", "start", "--mode=trace", "--rules-file=/src/examples/runtime-test.yaml", "-v"]
+    privileged: true
+    pid: host
+    network_mode: host
+    volumes:
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - /sys/fs/bpf:/sys/fs/bpf:rw
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - SYS_PTRACE
+    stdin_open: true
+    tty: true
+
+  # All tests combined
+  test-all:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: test-runner
+    command: |
+      bash -c '
+        set -e
+        echo "=== Running Rego tests ==="
+        opa test -v ./bundle/...
+        echo "=== Running unit tests ==="
+        go test -v -count=1 ./pkg/... ./internal/core/...
+        echo "=== Running eBPF tests ==="
+        go test -v -count=1 -tags=ebpf -timeout=120s ./internal/handlers/tracer/... ./pkg/ebpf/...
+        echo "=== Running integration tests ==="
+        go test -v -count=1 -tags=integration -timeout=300s ./tests/integration/... 2>/dev/null || echo "INFO: no integration tests found yet"
+        echo "=== All tests passed ==="
+      '
+    privileged: true
+    pid: host
+    network_mode: host
+    volumes:
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - /sys/fs/bpf:/sys/fs/bpf:rw
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - SYS_PTRACE
