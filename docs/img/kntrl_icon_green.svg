@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 110 110" fill="none">
+  <!-- kntrl icon – green shield variant -->
+
+  <!-- Shield body -->
+  <path d="M55 8L16 24v32c0 30 39 52 39 52s39-22 39-52V24L55 8z"
+        fill="#4BD783" />
+
+  <!-- Inner shield -->
+  <path d="M55 16L26 28v26c0 24 29 42 29 42s29-18 29-42V28L55 16z"
+        fill="#3bc272" />
+
+  <!-- eBPF kernel pulse -->
+  <polyline points="28,58 38,58 43,42 48,70 53,50 58,62 63,54 68,58 82,58"
+            stroke="#101820" stroke-width="3.5" fill="none"
+            stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Center dot -->
+  <circle cx="55" cy="58" r="3.5" fill="#101820" />
+
+  <!-- Top shield accent -->
+  <path d="M55 8L16 24v4L55 12l39 16v-4L55 8z"
+        fill="#ffffff" opacity="0.3" />
+</svg>
