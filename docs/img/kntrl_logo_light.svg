@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" fill="none">
+  <!-- kntrl logo – light variant (for dark backgrounds) -->
+
+  <!-- Shield icon with eBPF kernel pulse -->
+  <g transform="translate(10, 5)">
+    <!-- Outer shield -->
+    <path d="M55 8L20 22v30c0 28 35 48 35 48s35-20 35-48V22L55 8z"
+          fill="#4BD783" opacity="0.08" />
+    <path d="M55 4L16 20v32c0 30 39 52 39 52s39-22 39-52V20L55 4z"
+          stroke="#ffffff" stroke-width="3.5" fill="none" stroke-linejoin="round" />
+
+    <!-- Inner shield glow -->
+    <path d="M55 14L26 26v26c0 24 29 42 29 42s29-18 29-42V26L55 14z"
+          fill="#4BD783" opacity="0.15" />
+
+    <!-- eBPF kernel pulse line -->
+    <polyline points="30,56 40,56 45,40 50,68 55,48 60,60 65,52 70,56 80,56"
+              stroke="#4BD783" stroke-width="3" fill="none"
+              stroke-linecap="round" stroke-linejoin="round" />
+
+    <!-- Center dot -->
+    <circle cx="55" cy="56" r="3" fill="#4BD783" />
+  </g>
+
+  <!-- Wordmark: kntrl -->
+  <g transform="translate(130, 28)">
+    <!-- k -->
+    <path d="M0 0v64h10V38l22 26h14L22 34 44 8H30L10 32V0H0z"
+          fill="#ffffff" />
+    <!-- n -->
+    <path d="M56 8v56h10V34c0-10 8-18 18-18s18 8 18 18v30h10V32c0-16-12-28-28-28c-8 0-16 4-20 12V8H56z"
+          fill="#ffffff" />
+    <!-- t -->
+    <path d="M130 0v8h-8v10h8v30c0 10 6 16 16 16h6V54h-6c-4 0-6-2-6-6V18h12V8h-12V0H130z"
+          fill="#ffffff" />
+    <!-- r -->
+    <path d="M172 8v56h10V32c0-10 6-16 16-16h2V6h-2c-8 0-14 4-16 10V8H172z"
+          fill="#ffffff" />
+    <!-- l -->
+    <path d="M216 0v64h10V0H216z"
+          fill="#ffffff" />
+  </g>
+
+  <!-- Accent bar -->
+  <rect x="130" y="96" width="96" height="3" rx="1.5" fill="#4BD783" />
+</svg>

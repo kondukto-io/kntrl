@@ -1,4 +1,4 @@
-![kntrl logo](./docs/img/kntrl_logo.png) <!-- markdownlint-disable-line first-line-heading -->
+![kntrl logo](./docs/img/kntrl_logo_dark.svg) <!-- markdownlint-disable-line first-line-heading -->
 
 `kntrl` is an eBPF-based runtime security agent that monitors and controls network, process, DNS, TLS, and file activity on CI/CD runners and build pipelines. It hooks into kernel-level syscalls to enforce policies in real time — blocking supply-chain attacks, unauthorized network access, and anomalous process behaviour before they cause damage.
 
