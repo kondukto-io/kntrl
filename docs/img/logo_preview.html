@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { font-family: system-ui; margin: 40px; }
+  .row { display: flex; gap: 40px; margin-bottom: 40px; align-items: center; }
+  .card { padding: 30px; border-radius: 12px; }
+  .light { background: #ffffff; border: 1px solid #ddd; }
+  .dark { background: #101820; }
+  h2 { margin-top: 40px; color: #333; }
+  img { display: block; }
+  .label { font-size: 12px; color: #888; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>kntrl Logo Suite</h1>
+
+<h2>Full Logo (icon + wordmark)</h2>
+<div class="row">
+  <div class="card light">
+    <img src="kntrl_logo_dark.svg" height="80">
+    <div class="label">Dark variant (light bg)</div>
+  </div>
+  <div class="card dark">
+    <img src="kntrl_logo_light.svg" height="80">
+    <div class="label" style="color:#666">Light variant (dark bg)</div>
+  </div>
+</div>
+
+<h2>Icon Only</h2>
+<div class="row">
+  <div class="card light">
+    <img src="kntrl_icon.svg" height="80">
+    <div class="label">Dark shield</div>
+  </div>
+  <div class="card dark">
+    <img src="kntrl_icon.svg" height="80">
+    <div class="label" style="color:#666">Dark shield (on dark bg)</div>
+  </div>
+  <div class="card light">
+    <img src="kntrl_icon_green.svg" height="80">
+    <div class="label">Green shield</div>
+  </div>
+  <div class="card dark">
+    <img src="kntrl_icon_green.svg" height="80">
+    <div class="label" style="color:#666">Green shield (on dark bg)</div>
+  </div>
+</div>
+
+<h2>Small sizes</h2>
+<div class="row">
+  <div class="card dark" style="padding:15px">
+    <img src="kntrl_icon.svg" height="32">
+    <div class="label" style="color:#666">32px</div>
+  </div>
+  <div class="card dark" style="padding:15px">
+    <img src="kntrl_icon_green.svg" height="32">
+    <div class="label" style="color:#666">32px</div>
+  </div>
+  <div class="card dark" style="padding:15px">
+    <img src="kntrl_icon.svg" height="16">
+    <div class="label" style="color:#666">16px favicon</div>
+  </div>
+  <div class="card dark" style="padding:15px">
+    <img src="kntrl_icon_green.svg" height="16">
+    <div class="label" style="color:#666">16px favicon</div>
+  </div>
+</div>
+
+<h2>Comparison with original</h2>
+<div class="row">
+  <div class="card light">
+    <img src="kntrl_logo.png" height="60">
+    <div class="label">Original (PNG)</div>
+  </div>
+  <div class="card light">
+    <img src="kntrl_logo_dark.svg" height="60">
+    <div class="label">New dark variant</div>
+  </div>
+</div>
+</body>
+</html>
