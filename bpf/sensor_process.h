@@ -83,8 +83,8 @@ int trace_exec(struct trace_event_raw_sched_process_exec *ctx) {
 	return 0;
 }
 
-SEC("tracepoint/sched/sched_process_fork")
-int trace_fork(struct trace_event_raw_sched_process_fork *ctx) {
+SEC("tp_btf/sched_process_fork")
+int BPF_PROG(trace_fork, struct task_struct *parent, struct task_struct *child) {
 	__u32 key = 0;
 	__u32 *enabled = bpf_map_lookup_elem(&process_monitor_map, &key);
 	if (!enabled || *enabled == 0)
@@ -103,11 +103,11 @@ int trace_fork(struct trace_event_raw_sched_process_fork *ctx) {
 		return 0;
 
 	evt->ts_us = bpf_ktime_get_ns() / 1000;
-	evt->pid = ctx->child_pid;
-	evt->ppid = bpf_get_current_pid_tgid() >> 32;
+	evt->pid = BPF_CORE_READ(child, tgid);
+	evt->ppid = BPF_CORE_READ(parent, tgid);
 	evt->event_type = EVENT_TYPE_FORK;
 
-	bpf_probe_read_str(&evt->comm, TASK_COMM_LEN, ctx->child_comm);
+	BPF_CORE_READ_STR_INTO(&evt->comm, child, comm);
 	evt->filename[0] = '\0';
 	evt->args[0] = '\0';
 	evt->args_len = 0;

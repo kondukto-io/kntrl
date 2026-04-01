@@ -66,7 +66,6 @@ const (
 var tracePointAttach = map[string][2]string{
 	"inet_sock_set_state": {"sock", "inet_sock_set_state"},
 	"trace_exec":          {"sched", "sched_process_exec"},
-	"trace_fork":          {"sched", "sched_process_fork"},
 	"trace_openat":        {"syscalls", "sys_enter_openat"},
 	"trace_renameat2":     {"syscalls", "sys_enter_renameat2"},
 	"trace_unlinkat":      {"syscalls", "sys_enter_unlinkat"},
