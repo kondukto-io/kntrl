@@ -107,7 +107,7 @@ int trace_fork(struct trace_event_raw_sched_process_fork *ctx) {
 	evt->ppid = bpf_get_current_pid_tgid() >> 32;
 	evt->event_type = EVENT_TYPE_FORK;
 
-	BPF_CORE_READ_STR_INTO(&evt->comm, ctx, child_comm);
+	bpf_probe_read_kernel_str(&evt->comm, TASK_COMM_LEN, ctx->child_comm);
 	evt->filename[0] = '\0';
 	evt->args[0] = '\0';
 	evt->args_len = 0;
