@@ -103,11 +103,11 @@ int trace_fork(struct trace_event_raw_sched_process_fork *ctx) {
 		return 0;
 
 	evt->ts_us = bpf_ktime_get_ns() / 1000;
-	evt->pid = BPF_CORE_READ(ctx, child_pid);
+	evt->pid = ctx->child_pid;
 	evt->ppid = bpf_get_current_pid_tgid() >> 32;
 	evt->event_type = EVENT_TYPE_FORK;
 
-	bpf_probe_read_kernel_str(&evt->comm, TASK_COMM_LEN, ctx->child_comm);
+	bpf_probe_read_str(&evt->comm, TASK_COMM_LEN, ctx->child_comm);
 	evt->filename[0] = '\0';
 	evt->args[0] = '\0';
 	evt->args_len = 0;
