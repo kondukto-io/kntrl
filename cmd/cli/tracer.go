@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
@@ -10,7 +11,10 @@ import (
 	"github.com/kondukto-io/kntrl/internal/handlers/tracer"
 )
 
-const pidfile = "/var/run/kntrl.pid"
+const (
+	pidfile = "/var/run/kntrl.pid"
+	logfile = "/var/log/kntrl.log"
+)
 
 var daemon = false
 
@@ -66,9 +70,15 @@ func daemonize(args []string) error {
 		filteredArgs = append(filteredArgs, args[i])
 	}
 
+	logFile, err := os.OpenFile(logfile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("failed to open daemon log file %s: %w", logfile, err)
+	}
+	defer logFile.Close()
+
 	cmd := exec.Command(os.Args[0], filteredArgs...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 	cmd.Stdin = nil
 
 	if err := cmd.Start(); err != nil {
@@ -76,7 +86,7 @@ func daemonize(args []string) error {
 	}
 
 	savePID(cmd.Process.Pid)
-	qwm(0, "Process started with PID: "+strconv.Itoa(cmd.Process.Pid))
+	qwm(0, fmt.Sprintf("Process started with PID: %d (logs: %s)", cmd.Process.Pid, logfile))
 
 	return nil
 }
