@@ -140,6 +140,13 @@ func Run(cmd cobra.Command) error {
 	}
 	cloudClient := initCloudClient(&cmd, policyCfg, rulesFile, rulesDir, ciMeta)
 
+	// Remove memory lock restrictions for eBPF programs. This must happen
+	// before loading any collection on kernels < 5.11, otherwise map
+	// allocation fails with EPERM.
+	if err := rlimit.RemoveMemlock(); err != nil {
+		return err
+	}
+
 	// --- eBPF program loading ---
 	var ebpfClient = ebpfman.New()
 	if err := ebpfClient.Load(prog); err != nil {
@@ -195,11 +202,6 @@ func Run(cmd cobra.Command) error {
 	// Preload established TCP connections so existing sessions (e.g. SSH)
 	// are not disrupted when the egress BPF filter attaches.
 	preloadEstablishedConns(allowedIPMap, allowedIPv6Map)
-
-	// Remove memory lock restrictions for eBPF programs.
-	if err := rlimit.RemoveMemlock(); err != nil {
-		return err
-	}
 
 	// --- Attach eBPF programs to kernel hooks ---
 	cleanups, err := attachPrograms(ebpfClient)
