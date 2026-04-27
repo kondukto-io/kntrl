@@ -5,10 +5,43 @@ package tracer
 import (
 	"encoding/binary"
 	"net"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/kondukto-io/kntrl/pkg/logger"
 )
+
+// readyEnvVar names the environment variable through which the daemoniser
+// passes the readiness pipe file descriptor to this process. Kept in sync
+// with cmd/cli's readyEnv.
+const readyEnvVar = "KNTRL_READY_FD"
+
+// signalReady writes a single byte to the readiness pipe inherited from the
+// parent and unsets the env var so child processes don't try to write to the
+// same fd.
+func signalReady() {
+	fdStr := os.Getenv(readyEnvVar)
+	if fdStr == "" {
+		return
+	}
+	os.Unsetenv(readyEnvVar)
+
+	fd, err := strconv.Atoi(fdStr)
+	if err != nil {
+		logger.Log.Warnf("invalid %s value %q: %v", readyEnvVar, fdStr, err)
+		return
+	}
+	f := os.NewFile(uintptr(fd), "ready")
+	if f == nil {
+		logger.Log.Warnf("invalid readiness fd %d", fd)
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write([]byte{1}); err != nil {
+		logger.Log.Warnf("failed to signal readiness on fd %d: %v", fd, err)
+	}
+}
 
 // trimNullBytesLong converts a byte slice to a string, stopping at the first
 // NUL byte. Used to extract C-style strings from fixed-size BPF event fields

@@ -235,6 +235,10 @@ func Run(cmd cobra.Command) error {
 	// Start async DNS resolution worker for reverse lookups.
 	utils.StartDNSWorker()
 
+	// signal readiness to a daemonising parent now that eBPF programs are
+	// attached and event processing is about to start.
+	signalReady()
+
 	// --- Signal handling ---
 	stopChan := make(chan os.Signal, 1)
 	sighupChan := make(chan os.Signal, 1)
