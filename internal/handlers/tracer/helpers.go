@@ -6,11 +6,48 @@ import (
 	"encoding/binary"
 	"net"
 	"os"
+	"os/user"
+	"runtime"
 	"strconv"
 	"strings"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/kondukto-io/kntrl/pkg/logger"
 )
+
+// logRuntimeEnvironment emits a short summary of the kernel/eBPF environment
+// at info level. The intent is to surface prerequisites operators commonly
+// get wrong (cgroup v2 mount, BTF availability, memlock limit, effective
+// uid) in the daemon log before any BPF call has a chance to fail.
+func logRuntimeEnvironment() {
+	logger.Log.Info("kntrl runtime environment:")
+
+	if u, err := user.Current(); err == nil {
+		logger.Log.Infof("  user: %s (uid=%s gid=%s)", u.Username, u.Uid, u.Gid)
+	}
+
+	if data, err := os.ReadFile("/proc/sys/kernel/osrelease"); err == nil {
+		logger.Log.Infof("  kernel: %s (%s)", strings.TrimSpace(string(data)), runtime.GOARCH)
+	}
+
+	var lim unix.Rlimit
+	if err := unix.Getrlimit(unix.RLIMIT_MEMLOCK, &lim); err == nil {
+		logger.Log.Infof("  memlock: cur=%d max=%d", lim.Cur, lim.Max)
+	}
+
+	if _, err := os.Stat("/sys/fs/cgroup/cgroup.controllers"); err == nil {
+		logger.Log.Info("  cgroup v2: mounted at /sys/fs/cgroup")
+	} else {
+		logger.Log.Warn("  cgroup v2: /sys/fs/cgroup does not look like a unified hierarchy; egress filtering will fail")
+	}
+
+	if _, err := os.Stat("/sys/kernel/btf/vmlinux"); err == nil {
+		logger.Log.Info("  BTF: /sys/kernel/btf/vmlinux available")
+	} else {
+		logger.Log.Warn("  BTF: /sys/kernel/btf/vmlinux missing; CO-RE relocations may fail on older kernels")
+	}
+}
 
 // readyEnvVar names the environment variable through which the daemoniser
 // passes the readiness pipe file descriptor to this process. Kept in sync

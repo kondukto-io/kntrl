@@ -117,6 +117,8 @@ func init() {
 func Run(cmd cobra.Command) error {
 	var bundleFS = bundle.Bundle
 
+	logRuntimeEnvironment()
+
 	// --- Configuration loading ---
 	tracerMode, cmddata, dataObj, externalRegoFiles, webhookConfigs, policyCfg, err := loadRunConfig(&cmd)
 	if err != nil {
