@@ -90,10 +90,13 @@ func TestWebhookSendAll(t *testing.T) {
 }
 
 func TestWebhookCustomHeaders(t *testing.T) {
+	var mu sync.Mutex
 	var receivedAuth string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		receivedAuth = r.Header.Get("Authorization")
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -114,6 +117,8 @@ func TestWebhookCustomHeaders(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
+	mu.Lock()
+	defer mu.Unlock()
 	if receivedAuth != "Bearer test-token" {
 		t.Errorf("expected Authorization header 'Bearer test-token', got %q", receivedAuth)
 	}
