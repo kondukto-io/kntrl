@@ -44,6 +44,9 @@ const (
 
 	// EventPolicyStatusBlock is the block status of the event
 	EventPolicyStatusBlock = "block"
+
+	// EventPolicyStatusFlag marks events that matched a monitoring rule
+	EventPolicyStatusFlag = "flag"
 )
 
 const (

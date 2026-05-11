@@ -116,7 +116,7 @@ func (rt *tracerRuntime) processEventLoop(reader *ringbuf.Reader) {
 					Comm:           utils.TrimNullBytes(event.Comm),
 					Filename:       "[inherited]",
 					TimestampUs:    event.TsUs,
-					Policy:         "flag",
+					Policy:         domain.EventPolicyStatusFlag,
 					MatchedEnvVars: vars,
 				})
 				logger.Log.Infof("[env] pid=%d comm=%s inherited env vars: %v",

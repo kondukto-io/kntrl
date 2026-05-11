@@ -33,7 +33,7 @@ func loadRunConfig(cmd *cobra.Command) (
 	err error,
 ) {
 	// Validate tracer mode flag.
-	tracerMode = cmd.Flag("mode").Value.String()
+	tracerMode, _ = cmd.Flags().GetString("mode")
 	if tracerMode == "" {
 		return "", nil, nil, nil, nil, nil, errors.New("[mode] flag is required")
 	}
@@ -86,7 +86,7 @@ func gatherCLIFlags(cmd *cobra.Command) config.CLIFlags {
 
 	flags.AllowedHosts, _ = cmd.Flags().GetString("allowed-hosts")
 	flags.AllowedIPs, _ = cmd.Flags().GetString("allowed-ips")
-	flags.Mode = cmd.Flag("mode").Value.String()
+	flags.Mode, _ = cmd.Flags().GetString("mode")
 	flags.RulesFile, _ = cmd.Flags().GetString("rules-file")
 	flags.RulesDir, _ = cmd.Flags().GetString("rules-dir")
 	flags.APIKey, _ = cmd.Flags().GetString("api-key")
@@ -166,10 +166,10 @@ func resolveCloudConfig(cmd *cobra.Command, policyCfg *config.PolicyConfig, rule
 // --allowed-ips, etc.) for backward compatibility with the old flag-only
 // configuration mode.
 func parseFlags(cmd *cobra.Command) (*domain.Data, error) {
-	allowedHostsFlag := cmd.Flag("allowed-hosts")
-	allowedIPAddrFlag := cmd.Flag("allowed-ips")
+	allowedHosts, _ := cmd.Flags().GetString("allowed-hosts")
+	allowedIPs, _ := cmd.Flags().GetString("allowed-ips")
 
-	if allowedIPAddrFlag.Value.String() == "" && allowedHostsFlag.Value.String() == "" {
+	if allowedIPs == "" && allowedHosts == "" {
 		return nil, errors.New("no allowed hostname or IP addresses provided")
 	}
 
@@ -187,8 +187,8 @@ func parseFlags(cmd *cobra.Command) (*domain.Data, error) {
 	}
 
 	return parser.ToDataJson(
-		allowedHostsFlag.Value.String(),
-		allowedIPAddrFlag.Value.String(),
+		allowedHosts,
+		allowedIPs,
 		ghmeta,
 		localranges,
 		allowmeta,

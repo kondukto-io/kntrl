@@ -65,8 +65,8 @@ func (rt *tracerRuntime) fileEventLoop(reader *ringbuf.Reader) {
 		// events, apply the path filter: only events matching a monitored path
 		// (or /proc/*/environ when env var monitoring is active) are reported.
 		isFileBlocked := event.Blocked == 1
+		isEnvFile := len(rt.monitoredEnvVars) > 0 && utils.IsEnvironFile(filename)
 		if !isFileBlocked {
-			isEnvFile := len(rt.monitoredEnvVars) > 0 && utils.IsEnvironFile(filename)
 			var matched bool
 			var matchedRule string
 			if hasPathFilter {
@@ -87,7 +87,7 @@ func (rt *tracerRuntime) fileEventLoop(reader *ringbuf.Reader) {
 			Filename:    filename,
 			Flags:       event.Flags,
 			TimestampUs: event.TsUs,
-			Policy:      "flag",
+			Policy:      domain.EventPolicyStatusFlag,
 			Operation:   opStr,
 		}
 
@@ -100,7 +100,6 @@ func (rt *tracerRuntime) fileEventLoop(reader *ringbuf.Reader) {
 
 		// Detect environment variable access when a process reads
 		// /proc/*/environ and we have env vars configured for monitoring.
-		isEnvFile := len(rt.monitoredEnvVars) > 0 && utils.IsEnvironFile(filename)
 		if isEnvFile {
 			if vars := utils.FindMatchingEnvVars(event.Pid, rt.monitoredEnvVars); len(vars) > 0 {
 				reportEvent.MatchedEnvVars = vars
