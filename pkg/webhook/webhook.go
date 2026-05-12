@@ -93,6 +93,9 @@ func (c *Client) dispatch(evt Event) {
 			logger.Log.Errorf("webhook send error for %s: %v", cfg.URL, err)
 			continue
 		}
+		if resp == nil {
+			continue
+		}
 		resp.Body.Close()
 
 		if resp.StatusCode >= 400 {

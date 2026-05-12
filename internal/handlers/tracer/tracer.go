@@ -20,6 +20,7 @@ import (
 	"io/fs"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -66,7 +67,6 @@ const (
 var tracePointAttach = map[string][2]string{
 	"inet_sock_set_state": {"sock", "inet_sock_set_state"},
 	"trace_exec":          {"sched", "sched_process_exec"},
-	"trace_fork":          {"sched", "sched_process_fork"},
 	"trace_openat":        {"syscalls", "sys_enter_openat"},
 	"trace_renameat2":     {"syscalls", "sys_enter_renameat2"},
 	"trace_unlinkat":      {"syscalls", "sys_enter_unlinkat"},
@@ -406,7 +406,7 @@ func initFileMonitor(ebpfClient *ebpfman.EBPF, cmd *cobra.Command, rulesFile, ru
 	if len(monitoredEnvVars) > 0 {
 		hasEnvironPath := false
 		for _, p := range monitoredPaths {
-			if contains(p, "/environ") {
+			if strings.Contains(p, "/environ") {
 				hasEnvironPath = true
 				break
 			}
@@ -476,7 +476,7 @@ func initCloudClient(cmd *cobra.Command, policyCfg *config.PolicyConfig, rulesFi
 // initReporter creates a new event reporter that writes to the output file
 // specified by CLI flags.
 func initReporter(cmd *cobra.Command) *reporter.Reporter {
-	outputDir := cmd.Flag("output-file-name").Value.String()
+	outputDir, _ := cmd.Flags().GetString("output-file-name")
 	report := reporter.NewReporter(outputDir)
 	if report.Err != nil {
 		logger.Log.Fatalf("failed to create reporter: %s", report.Err)
@@ -564,9 +564,6 @@ func handleSIGHUP(
 	ebpfClient *ebpfman.EBPF,
 	rt *tracerRuntime,
 ) {
-	blockedExecMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapBlockedExec]
-	protectedPathsMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapProtectedPaths]
-
 	for range sighupChan {
 		logger.Log.Info("SIGHUP: reloading policy...")
 		newPolicy, newData, err := loadConfig(rulesFile, rulesDir, gatherCLIFlags(cmd), bundleFS, externalRegoFiles)
@@ -587,24 +584,8 @@ func handleSIGHUP(
 				logger.Log.Errorf("SIGHUP: failed to update IPv6 maps: %v", err)
 			}
 		}
-		if blockedExecMap != nil && newData.BlockedExecutables != nil {
-			for _, exe := range newData.BlockedExecutables {
-				var key [16]byte
-				copy(key[:], exe)
-				if err := blockedExecMap.Put(key, uint32(1)); err != nil {
-					logger.Log.Warnf("SIGHUP: failed to update blocked exec map: %v", err)
-				}
-			}
-		}
-		if protectedPathsMap != nil && newData.ProtectedPaths != nil {
-			for _, path := range newData.ProtectedPaths {
-				var key [256]byte
-				copy(key[:], path)
-				if err := protectedPathsMap.Put(key, uint32(1)); err != nil {
-					logger.Log.Warnf("SIGHUP: failed to update protected paths map: %v", err)
-				}
-			}
-		}
+		populateBlockedExecMap(ebpfClient, newData)
+		populateProtectedPathsMap(ebpfClient, newData)
 
 		rt.cmddata = newData
 		policyPtr.Store(newPolicy)
@@ -628,17 +609,3 @@ func handleShutdown(stopChan chan os.Signal, done chan bool, readers ...*ringbuf
 	}
 }
 
-// contains checks if substr is present in s. It's a simple helper to avoid
-// importing strings in this file for a single call.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchSubstring(s, substr)
-}
-
-func searchSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

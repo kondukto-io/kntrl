@@ -201,6 +201,9 @@ func (c *Client) authenticate() (*authResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("auth request error: %w", err)
 	}
+	if resp == nil {
+		return nil, fmt.Errorf("auth returned nil response")
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -277,6 +280,9 @@ func (c *Client) post(path string, payload any) error {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("send error: %w", err)
+	}
+	if resp == nil {
+		return fmt.Errorf("nil response from %s", path)
 	}
 	resp.Body.Close()
 

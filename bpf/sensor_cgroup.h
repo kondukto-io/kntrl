@@ -24,6 +24,10 @@ static __always_inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 	struct iphdr iph;
 	bpf_skb_load_bytes(skb, 0, &iph, sizeof(struct iphdr));
 
+	/* Look up mode once for both IPv4 and IPv6 paths. */
+	__u32 key = 0;
+	__u32 *mode = bpf_map_lookup_elem(&mode_map, &key);
+
 	if (iph.version == 4) {
 		/* Always allow DNS traffic (port 53) — DNS is monitored
 		 * separately by the DNS event hooks, and blocking DNS here
@@ -34,18 +38,12 @@ static __always_inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 
 		bool pass = bpf_map_lookup_elem(&allowed_ip_map, &iph.saddr) || bpf_map_lookup_elem(&allowed_ip_map, &iph.daddr);
 
-		__u32 key = 0;
-		__u32 *mode;
-
-		mode = bpf_map_lookup_elem(&mode_map, &key);
-		if (mode) {
-			if (*mode == MODE_ALLOW) {
-				block = (*mode && pass);
-			}
+		if (mode && *mode == MODE_ALLOW) {
+			block = (*mode && pass);
 		}
 
-		/* Try to extract TLS SNI from egress TCP packets */
-		if (egress)
+		/* Try to extract TLS SNI from egress TCP packets on port 443 */
+		if (egress && dport == 443)
 			try_extract_sni(skb, &iph);
 	} else if (iph.version == 6) {
 		struct ipv6hdr ip6h;
@@ -54,14 +52,8 @@ static __always_inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
 		bool pass = bpf_map_lookup_elem(&allowed_ipv6_map, &ip6h.saddr) ||
 			    bpf_map_lookup_elem(&allowed_ipv6_map, &ip6h.daddr);
 
-		__u32 key = 0;
-		__u32 *mode;
-
-		mode = bpf_map_lookup_elem(&mode_map, &key);
-		if (mode) {
-			if (*mode == MODE_ALLOW) {
-				block = (*mode && pass);
-			}
+		if (mode && *mode == MODE_ALLOW) {
+			block = (*mode && pass);
 		}
 	}
 

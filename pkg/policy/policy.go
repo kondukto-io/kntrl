@@ -5,6 +5,7 @@ import (
 	"fmt"
 	files "io/fs"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -70,6 +71,9 @@ func New(fs files.FS, data []byte, opts ...Option) (*Policy, error) {
 	dataJson, err := unmarshal(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal data json: %w", err)
+	}
+	if dataJson == nil {
+		dataJson = make(map[string]any)
 	}
 
 	// load data objects inside 'assets' dir
@@ -175,7 +179,7 @@ func (p *Policy) EvalEvent(ctx context.Context, event domain.ReportEvent) (bool,
 // Cache key includes task name, destination, port, and ancestors to ensure
 // ancestry-based rules (e.g. block python-from-npm) are evaluated correctly.
 func (p *Policy) EvalEventCached(ctx context.Context, event domain.ReportEvent) (bool, error) {
-	key := event.TaskName + "|" + event.DestinationAddress + "|" + fmt.Sprint(event.DestinationPort) + "|" + strings.Join(event.Ancestors, ",")
+	key := event.TaskName + "|" + event.DestinationAddress + "|" + strconv.FormatUint(uint64(event.DestinationPort), 10) + "|" + strings.Join(event.Ancestors, ",")
 
 	if cached, ok := p.policyCache.Load(key); ok {
 		entry := cached.(policyCacheEntry)

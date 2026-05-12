@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  vet-and-test:
+    name: Vet & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Set up Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
+        with:
+          go-version: '1.25'
+          cache: true
+          cache-dependency-path: ./go.sum
+      - name: Verify go.sum
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+      - name: Go vet
+        run: go vet ./pkg/... ./internal/core/...
+      - name: Unit tests
+        run: go test -count=1 -race ./pkg/... ./internal/core/...
+
+  govulncheck:
+    name: Govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Set up Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
+        with:
+          go-version: '1.25'
+          cache: true
+          cache-dependency-path: ./go.sum
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  nilaway:
+    name: Nilaway
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Set up Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
+        with:
+          go-version: '1.25'
+          cache: true
+          cache-dependency-path: ./go.sum
+      - name: Install nilaway
+        run: go install go.uber.org/nilaway/cmd/nilaway@latest
+      - name: Run nilaway
+        run: nilaway -exclude-test-files ./pkg/... ./internal/...

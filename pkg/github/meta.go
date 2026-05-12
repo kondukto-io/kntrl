@@ -32,6 +32,9 @@ func FetchMeta(ctx context.Context) (actions, web, api, git []string, err error)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("fetching GitHub meta: %w", err)
 	}
+	if resp == nil {
+		return nil, nil, nil, nil, fmt.Errorf("nil response from GitHub meta")
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
