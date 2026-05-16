@@ -117,6 +117,8 @@ func init() {
 func Run(cmd cobra.Command) error {
 	var bundleFS = bundle.Bundle
 
+	logRuntimeEnvironment()
+
 	// --- Configuration loading ---
 	tracerMode, cmddata, dataObj, externalRegoFiles, webhookConfigs, policyCfg, err := loadRunConfig(&cmd)
 	if err != nil {
@@ -139,6 +141,13 @@ func Run(cmd cobra.Command) error {
 		logger.Log.Infof("CI detected: %s (repo=%s branch=%s)", ciMeta.Provider, ciMeta.Repository, ciMeta.Branch)
 	}
 	cloudClient := initCloudClient(&cmd, policyCfg, rulesFile, rulesDir, ciMeta)
+
+	// Remove memory lock restrictions for eBPF programs. This must happen
+	// before loading any collection on kernels < 5.11, otherwise map
+	// allocation fails with EPERM.
+	if err := rlimit.RemoveMemlock(); err != nil {
+		return err
+	}
 
 	// --- eBPF program loading ---
 	var ebpfClient = ebpfman.New()
@@ -196,11 +205,6 @@ func Run(cmd cobra.Command) error {
 	// are not disrupted when the egress BPF filter attaches.
 	preloadEstablishedConns(allowedIPMap, allowedIPv6Map)
 
-	// Remove memory lock restrictions for eBPF programs.
-	if err := rlimit.RemoveMemlock(); err != nil {
-		return err
-	}
-
 	// --- Attach eBPF programs to kernel hooks ---
 	cleanups, err := attachPrograms(ebpfClient)
 	if err != nil {
@@ -232,6 +236,10 @@ func Run(cmd cobra.Command) error {
 
 	// Start async DNS resolution worker for reverse lookups.
 	utils.StartDNSWorker()
+
+	// signal readiness to a daemonising parent now that eBPF programs are
+	// attached and event processing is about to start.
+	signalReady()
 
 	// --- Signal handling ---
 	stopChan := make(chan os.Signal, 1)

@@ -5,10 +5,80 @@ package tracer
 import (
 	"encoding/binary"
 	"net"
+	"os"
+	"os/user"
+	"runtime"
+	"strconv"
 	"strings"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/kondukto-io/kntrl/pkg/logger"
 )
+
+// logRuntimeEnvironment emits a short summary of the kernel/eBPF environment
+// at info level. The intent is to surface prerequisites operators commonly
+// get wrong (cgroup v2 mount, BTF availability, memlock limit, effective
+// uid) in the daemon log before any BPF call has a chance to fail.
+func logRuntimeEnvironment() {
+	logger.Log.Info("kntrl runtime environment:")
+
+	if u, err := user.Current(); err == nil {
+		logger.Log.Infof("  user: %s (uid=%s gid=%s)", u.Username, u.Uid, u.Gid)
+	}
+
+	if data, err := os.ReadFile("/proc/sys/kernel/osrelease"); err == nil {
+		logger.Log.Infof("  kernel: %s (%s)", strings.TrimSpace(string(data)), runtime.GOARCH)
+	}
+
+	var lim unix.Rlimit
+	if err := unix.Getrlimit(unix.RLIMIT_MEMLOCK, &lim); err == nil {
+		logger.Log.Infof("  memlock: cur=%d max=%d", lim.Cur, lim.Max)
+	}
+
+	if _, err := os.Stat("/sys/fs/cgroup/cgroup.controllers"); err == nil {
+		logger.Log.Info("  cgroup v2: mounted at /sys/fs/cgroup")
+	} else {
+		logger.Log.Warn("  cgroup v2: /sys/fs/cgroup does not look like a unified hierarchy; egress filtering will fail")
+	}
+
+	if _, err := os.Stat("/sys/kernel/btf/vmlinux"); err == nil {
+		logger.Log.Info("  BTF: /sys/kernel/btf/vmlinux available")
+	} else {
+		logger.Log.Warn("  BTF: /sys/kernel/btf/vmlinux missing; CO-RE relocations may fail on older kernels")
+	}
+}
+
+// readyEnvVar names the environment variable through which the daemoniser
+// passes the readiness pipe file descriptor to this process. Kept in sync
+// with cmd/cli's readyEnv.
+const readyEnvVar = "KNTRL_READY_FD"
+
+// signalReady writes a single byte to the readiness pipe inherited from the
+// parent and unsets the env var so child processes don't try to write to the
+// same fd.
+func signalReady() {
+	fdStr := os.Getenv(readyEnvVar)
+	if fdStr == "" {
+		return
+	}
+	os.Unsetenv(readyEnvVar)
+
+	fd, err := strconv.Atoi(fdStr)
+	if err != nil {
+		logger.Log.Warnf("invalid %s value %q: %v", readyEnvVar, fdStr, err)
+		return
+	}
+	f := os.NewFile(uintptr(fd), "ready")
+	if f == nil {
+		logger.Log.Warnf("invalid readiness fd %d", fd)
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write([]byte{1}); err != nil {
+		logger.Log.Warnf("failed to signal readiness on fd %d: %v", fd, err)
+	}
+}
 
 // trimNullBytesLong converts a byte slice to a string, stopping at the first
 // NUL byte. Used to extract C-style strings from fixed-size BPF event fields
