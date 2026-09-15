@@ -415,7 +415,7 @@ kntrl attaches the following eBPF programs to kernel hooks:
 | `skb_consume_udp`        | kprobe     | DNS packet capture              |
 | `inet_sock_set_state`    | tracepoint | TCP state change tracking       |
 | `sched_process_exec`     | tracepoint | Process execution events        |
-| `sched_process_fork`     | tracepoint | Process fork events             |
+| `sched_process_fork`     | tp_btf     | Process fork events             |
 | `security_socket_create` | kprobe     | Raw socket creation detection   |
 | TC classifier            | tc         | TLS SNI extraction from packets |
 

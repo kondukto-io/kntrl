@@ -72,9 +72,6 @@ func New(fs files.FS, data []byte, opts ...Option) (*Policy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal data json: %w", err)
 	}
-	if dataJson == nil {
-		dataJson = make(map[string]any)
-	}
 
 	// load data objects inside 'assets' dir
 	dataJson["assets"] = bundleClient.Data["assets"]
@@ -210,9 +207,16 @@ func (p *Policy) FlushCache() {
 	})
 }
 
-func unmarshal(data []byte) (dataJson map[string]any, err error) {
-	if err = util.Unmarshal(data, &dataJson); err != nil {
-		return dataJson, err
+// unmarshal decodes data into a map. The returned map is never nil on
+// success, even when data is JSON "null", so callers can write to it directly.
+func unmarshal(data []byte) (map[string]any, error) {
+	var dataJson map[string]any
+	if err := util.Unmarshal(data, &dataJson); err != nil {
+		return nil, err
+	}
+	// JSON "null" decodes to a nil map, and callers write into the result.
+	if dataJson == nil {
+		dataJson = make(map[string]any)
 	}
 
 	return dataJson, nil

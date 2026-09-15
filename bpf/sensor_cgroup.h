@@ -18,46 +18,45 @@ static __always_inline __u16 get_dst_port(struct __sk_buff *skb, struct iphdr *i
 	return 0;
 }
 
+/* Returns true to let the packet through, false to drop it. */
 static __always_inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
-	bool block = true;
-
 	struct iphdr iph;
 	bpf_skb_load_bytes(skb, 0, &iph, sizeof(struct iphdr));
 
-	/* Look up mode once for both IPv4 and IPv6 paths. */
-	__u32 key = 0;
-	__u32 *mode = bpf_map_lookup_elem(&mode_map, &key);
+	/* Anything that is not IPv4/IPv6 is passed untouched. */
+	if (iph.version != 4 && iph.version != 6)
+		return true;
 
 	if (iph.version == 4) {
+		__u16 dport = get_dst_port(skb, &iph);
+
 		/* Always allow DNS traffic (port 53) — DNS is monitored
 		 * separately by the DNS event hooks, and blocking DNS here
 		 * would prevent all name resolution from working. */
-		__u16 dport = get_dst_port(skb, &iph);
 		if (dport == 53)
 			return true;
-
-		bool pass = bpf_map_lookup_elem(&allowed_ip_map, &iph.saddr) || bpf_map_lookup_elem(&allowed_ip_map, &iph.daddr);
-
-		if (mode && *mode == MODE_ALLOW) {
-			block = (*mode && pass);
-		}
 
 		/* Try to extract TLS SNI from egress TCP packets on port 443 */
 		if (egress && dport == 443)
 			try_extract_sni(skb, &iph);
-	} else if (iph.version == 6) {
-		struct ipv6hdr ip6h;
-		bpf_skb_load_bytes(skb, 0, &ip6h, sizeof(ip6h));
-
-		bool pass = bpf_map_lookup_elem(&allowed_ipv6_map, &ip6h.saddr) ||
-			    bpf_map_lookup_elem(&allowed_ipv6_map, &ip6h.daddr);
-
-		if (mode && *mode == MODE_ALLOW) {
-			block = (*mode && pass);
-		}
 	}
 
-	return block;
+	/* Only allow-list mode enforces; in monitor mode everything passes, so
+	 * skip the allow-list lookups entirely. */
+	__u32 key = 0;
+	__u32 *mode = bpf_map_lookup_elem(&mode_map, &key);
+	if (!mode || *mode != MODE_ALLOW)
+		return true;
+
+	if (iph.version == 4)
+		return bpf_map_lookup_elem(&allowed_ip_map, &iph.saddr) ||
+		       bpf_map_lookup_elem(&allowed_ip_map, &iph.daddr);
+
+	struct ipv6hdr ip6h;
+	bpf_skb_load_bytes(skb, 0, &ip6h, sizeof(ip6h));
+
+	return bpf_map_lookup_elem(&allowed_ipv6_map, &ip6h.saddr) ||
+	       bpf_map_lookup_elem(&allowed_ipv6_map, &ip6h.daddr);
 }
 
 /* ========================
