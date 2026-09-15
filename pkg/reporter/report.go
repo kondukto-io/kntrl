@@ -2,8 +2,6 @@ package reporter
 
 import (
 	"bufio"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -116,31 +114,40 @@ func LoadAndPrint() error {
 	return nil
 }
 
+// writeJSONLine marshals event and appends it to the report file as one JSON
+// line. Callers must hold r.mu. The buffered writer is flushed by Close.
+func (r *Reporter) writeJSONLine(kind string, event any) {
+	eventData, err := json.Marshal(event)
+	if err != nil {
+		logger.Log.Errorf("failed to marshal %s event: %v", kind, err)
+		return
+	}
+
+	if _, err = r.writer.Write(eventData); err != nil {
+		logger.Log.Errorf("failed to write %s event to file: %s %v", kind, r.file.Name(), err)
+		return
+	}
+	if err = r.writer.WriteByte('\n'); err != nil {
+		logger.Log.Errorf("failed to write %s event to file: %s %v", kind, r.file.Name(), err)
+	}
+}
+
 // WriteEvent adds an event to the report file
 func (r *Reporter) WriteEvent(event domain.ReportEvent) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	var address = event.DestinationAddress + ":" + fmt.Sprint(event.DestinationPort)
-	var h = hash(address)
+	var address = event.DestinationAddress + ":" + strconv.FormatUint(uint64(event.DestinationPort), 10)
 
-	if _, ok := r.eventsHashMap[h]; ok {
+	if _, ok := r.eventsHashMap[address]; ok {
 		logger.Log.Debugf("event with address [%s] already exists", address)
 		return
 	}
 
 	r.events = append(r.events, event)
-	r.eventsHashMap[h] = true
+	r.eventsHashMap[address] = true
 
-	eventData, err := json.Marshal(event)
-	if err != nil {
-		logger.Log.Errorf("failed to marshal event: %v", err)
-		return
-	}
-
-	if _, err = r.writer.WriteString(string(eventData) + "\n"); err != nil {
-		logger.Log.Errorf("failed to write event to file: %s %v", r.file.Name(), err)
-	}
+	r.writeJSONLine("network", event)
 }
 
 // WriteFileEvent adds a file access event to the report
@@ -150,15 +157,7 @@ func (r *Reporter) WriteFileEvent(event domain.FileReportEvent) {
 
 	r.fileEvents = append(r.fileEvents, event)
 
-	eventData, err := json.Marshal(event)
-	if err != nil {
-		logger.Log.Errorf("failed to marshal file event: %v", err)
-		return
-	}
-
-	if _, err = r.writer.WriteString(string(eventData) + "\n"); err != nil {
-		logger.Log.Errorf("failed to write file event to file: %s %v", r.file.Name(), err)
-	}
+	r.writeJSONLine("file", event)
 }
 
 // WriteDNSEvent adds a DNS event to the report
@@ -168,15 +167,7 @@ func (r *Reporter) WriteDNSEvent(event domain.DNSReportEvent) {
 
 	r.dnsEvents = append(r.dnsEvents, event)
 
-	eventData, err := json.Marshal(event)
-	if err != nil {
-		logger.Log.Errorf("failed to marshal dns event: %v", err)
-		return
-	}
-
-	if _, err = r.writer.WriteString(string(eventData) + "\n"); err != nil {
-		logger.Log.Errorf("failed to write dns event to file: %s %v", r.file.Name(), err)
-	}
+	r.writeJSONLine("dns", event)
 }
 
 // WriteProcessEvent adds a process event to the report
@@ -186,15 +177,7 @@ func (r *Reporter) WriteProcessEvent(event domain.ProcessReportEvent) {
 
 	r.processEvents = append(r.processEvents, event)
 
-	eventData, err := json.Marshal(event)
-	if err != nil {
-		logger.Log.Errorf("failed to marshal process event: %v", err)
-		return
-	}
-
-	if _, err = r.writer.WriteString(string(eventData) + "\n"); err != nil {
-		logger.Log.Errorf("failed to write process event to file: %s %v", r.file.Name(), err)
-	}
+	r.writeJSONLine("process", event)
 }
 
 // Close flushes the buffered writer and closes the report file.
@@ -397,7 +380,6 @@ func (r *Reporter) printProcessTree() {
 	}
 
 	nodeMap := make(map[uint32]*procNode)
-	var order []uint32
 
 	selfSet := r.selfPIDs()
 
@@ -409,7 +391,6 @@ func (r *Reporter) printProcessTree() {
 		if !exists {
 			n = &procNode{pid: ev.ProcessID, ppid: ev.ParentPID, comm: ev.Comm}
 			nodeMap[ev.ProcessID] = n
-			order = append(order, ev.ProcessID)
 		}
 
 		if ev.EventType == "fork" {
@@ -433,23 +414,13 @@ func (r *Reporter) printProcessTree() {
 		}
 	}
 
-	// Build children map
+	// Build children map, and find roots: processes whose ppid is not in
+	// nodeMap. Both outputs are sorted before rendering, so iteration order
+	// here does not matter.
 	children := make(map[uint32][]uint32)
-	for _, pid := range order {
-		n := nodeMap[pid]
-		if n == nil {
-			continue
-		}
-		children[n.ppid] = append(children[n.ppid], pid)
-	}
-
-	// Find roots: processes whose ppid is not in nodeMap
 	var roots []uint32
-	for _, pid := range order {
-		n := nodeMap[pid]
-		if n == nil {
-			continue
-		}
+	for pid, n := range nodeMap {
+		children[n.ppid] = append(children[n.ppid], pid)
 		if _, ok := nodeMap[n.ppid]; !ok {
 			roots = append(roots, pid)
 		}
@@ -465,9 +436,6 @@ func (r *Reporter) printProcessTree() {
 	var printTree func(pid uint32, prefix string, isLast bool)
 	printTree = func(pid uint32, prefix string, isLast bool) {
 		n := nodeMap[pid]
-		if n == nil {
-			return
-		}
 
 		connector := "├── "
 		if isLast {
@@ -483,7 +451,7 @@ func (r *Reporter) printProcessTree() {
 		}
 
 		policyTag := ""
-		if n.policy == "block" {
+		if n.policy == domain.EventPolicyStatusBlock {
 			policyTag = " [BLOCKED]"
 		}
 
@@ -526,20 +494,23 @@ func (r *Reporter) PrintSensitiveAccessReport() {
 		comm string
 	}
 	type accessSummary struct {
+		key     processKey
 		files   []string
 		envVars []string
 	}
 
+	// seen is a dedup index only; order carries the summaries themselves so
+	// the two cannot drift apart.
 	seen := make(map[processKey]*accessSummary)
-	var order []processKey
+	var order []*accessSummary
 
 	for _, ev := range r.fileEvents {
 		k := processKey{pid: ev.ProcessID, comm: ev.Comm}
 		s, exists := seen[k]
 		if !exists {
-			s = &accessSummary{}
+			s = &accessSummary{key: k}
 			seen[k] = s
-			order = append(order, k)
+			order = append(order, s)
 		}
 		// Dedup files (skip synthetic [inherited] marker)
 		if ev.Filename != "[inherited]" && !containsStr(s.files, ev.Filename) {
@@ -562,11 +533,7 @@ func (r *Reporter) PrintSensitiveAccessReport() {
 	data := pterm.TableData{
 		{"Pid", "Comm", "Files Accessed", "Env Vars Detected"},
 	}
-	for _, k := range order {
-		s, ok := seen[k]
-		if !ok {
-			continue
-		}
+	for _, s := range order {
 		files := strings.Join(s.files, ", ")
 		if files == "" {
 			files = "."
@@ -576,8 +543,8 @@ func (r *Reporter) PrintSensitiveAccessReport() {
 			envVars = "."
 		}
 		data = append(data, []string{
-			strconv.FormatUint(uint64(k.pid), 10),
-			k.comm,
+			strconv.FormatUint(uint64(s.key.pid), 10),
+			s.key.comm,
 			files,
 			envVars,
 		})
@@ -653,11 +620,4 @@ func containsStr(sl []string, s string) bool {
 		}
 	}
 	return false
-}
-
-func hash(text string) string {
-	hasher := md5.New()
-	hasher.Write([]byte(text))
-
-	return hex.EncodeToString(hasher.Sum(nil))
 }

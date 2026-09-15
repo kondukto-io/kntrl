@@ -65,7 +65,7 @@ kntrl loads **11 eBPF programs** across 4 program types:
 | `kprobe__security_socket_create` | Kprobe | `security_socket_create` | Raw socket creation detection |
 | `inet_sock_set_state` | Tracepoint | `sock:inet_sock_set_state` | TCP state transitions |
 | `trace_exec` | Tracepoint | `sched:sched_process_exec` | Process execution (execve) |
-| `trace_fork` | Tracepoint | `sched:sched_process_fork` | Process forking |
+| `trace_fork` | BTF Raw Tracepoint | `tp_btf/sched_process_fork` | Process forking |
 | `trace_openat` | Tracepoint | `syscalls:sys_enter_openat` | File open operations |
 | `egress` | CGroup SKB | `/sys/fs/cgroup` (inet egress) | Packet-level egress filtering |
 
@@ -220,9 +220,13 @@ Captures:
 
 ### Fork Events
 
-**Hook point**: `sched:sched_process_fork` tracepoint
+**Hook point**: `tp_btf/sched_process_fork` BTF-enabled raw tracepoint
 
-Captures: child PID, parent PID, process name. Fork events provide reliable parent PID from tracepoint args (more reliable than exec's ppid).
+Captures: child PID, parent PID, process name. The program receives the parent and child
+`task_struct` pointers directly, so both PIDs are read straight from the task structs
+(more reliable than exec's ppid). Using `tp_btf` rather than a classic tracepoint keeps
+CO-RE relocations resolvable on kernels whose BTF omits
+`struct trace_event_raw_sched_process_fork`.
 
 ### Process Tree
 
@@ -598,7 +602,7 @@ During config-to-OPA conversion:
 | DNS queries/responses | Kprobe on `skb_consume_udp` (port 53) | Kprobe | Kernel parse, userspace report |
 | TLS destination (SNI) | CGroup SKB egress ClientHello parse | CGroup SKB | Kernel extraction |
 | Process execution | Tracepoint `sched_process_exec` | Tracepoint | Kernel capture, userspace tree |
-| Process forking | Tracepoint `sched_process_fork` | Tracepoint | Kernel capture, userspace tree |
+| Process forking | BTF raw tracepoint `sched_process_fork` | BTF Raw Tracepoint | Kernel capture, userspace tree |
 | File access | Tracepoint `sys_enter_openat` | Tracepoint | Kernel capture, userspace filter |
 | Env var inheritance | Read `/proc/<pid>/environ` at exec | Tracepoint (exec trigger) | Userspace scan |
 | Cross-process env read | `/proc/*/environ` file open | Tracepoint (openat) | Kernel capture + userspace scan |
