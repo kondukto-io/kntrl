@@ -15,7 +15,7 @@ Refer to this [presentation](https://docs.google.com/presentation/d/1nmbqGfIxp9U
 - **OPA policy engine** — All policy decisions use Open Policy Agent with embedded Rego rules. Extend or override with custom `.rego` files.
 - **Two operating modes** — `monitor` (log only) and `trace` (enforce and block).
 - **Webhook alerting** — Send block/pass events to external endpoints in real time.
-- **Established connection preloading** — Reads `/proc/net/tcp{,6}` at startup so existing SSH and database connections survive agent start.
+- **Socket-scoped enforcement** — A policy grant permits only one kernel socket and destination address/port/protocol, never other processes connecting to the same IP.
 - **SIGHUP live reload** — Reload YAML rules and flush policy caches without restarting.
 - **Daemon mode** — Run in the background with PID file management.
 
@@ -182,6 +182,20 @@ See `examples/policy-v2.yaml` for a full example.
 
 ### Live reload
 
+In `trace` mode, start the agent before the workload creates its sockets. Existing
+connections are no longer automatically trusted. TCP may wait for its first SYN
+retry while OPA evaluates a new socket; non-DNS UDP applications must retry their
+initial datagram. SIGHUP revokes existing socket grants, so reconnect workloads
+after reloading their network policy.
+
+Use `--cgroup-path=/sys/fs/cgroup/<workload>` to enforce a dedicated cgroup subtree
+while keeping the agent and runner/SSH control plane outside it. The default is
+the root cgroup; applying trace mode there also restricts existing management
+connections. A socket grant follows the socket if a privileged workload passes
+its file descriptor to another process. Run untrusted workloads without host
+administration privileges. Fragments, non-TCP/UDP packets, and IPv6 extension
+headers are denied in trace mode; monitor mode remains pass-through.
+
 Send `SIGHUP` to the running agent to reload the YAML rules file and flush policy caches without restarting:
 
 ```bash
@@ -240,6 +254,22 @@ rules:
 If the connecting process matches a profile, **only** the hosts listed in that profile are allowed — the global allowed list does not apply.
 
 ## DNS monitoring
+
+In trace mode, TCP and UDP destination port 53 are allowed **only** to configured
+resolver addresses, for both IPv4 and IPv6. General host/IP grants do not override
+this restriction, and a DNS resolver does not receive permission on other ports.
+
+When `rules.dns.allowed_servers` is omitted, defaults are Cloudflare
+(`1.1.1.1`, `1.0.0.1`, `2606:4700:4700::1111`, `2606:4700:4700::1001`) and
+Google (`8.8.8.8`, `8.8.4.4`, `2001:4860:4860::8888`, `2001:4860:4860::8844`).
+An explicit list replaces these defaults and inherited lists; `allowed_servers: []`
+disables the exception. Add your corporate resolver or local DNS stub explicitly
+if the workload uses one. kntrl does not rewrite system DNS settings or derive
+permissions from `/etc/resolv.conf`.
+
+This restricts resolver destinations; it does not validate DNS payloads or prevent
+DNS tunneling through an approved resolver. DNS-over-HTTPS/TLS uses ordinary
+network policy, not the port-53 exception.
 
 `kntrl` captures DNS queries and responses at the kernel level via eBPF kprobes. This provides:
 

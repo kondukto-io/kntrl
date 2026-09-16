@@ -35,6 +35,7 @@ func initTracerCommand() *cobra.Command {
 	}
 
 	tracerCMD.Flags().String("mode", "monitor", "trace || monitor")
+	tracerCMD.Flags().String("cgroup-path", "/sys/fs/cgroup", "cgroup v2 subtree to enforce (run the agent outside a dedicated workload subtree)")
 	tracerCMD.Flags().Bool("allow-local-ranges", true, "allows access to local IP ranges")
 	tracerCMD.Flags().Bool("allow-github-meta", false, "allows access to GitHub meta IP ranges (https://api.github.com/meta)")
 	tracerCMD.Flags().Bool("allow-metadata", false, "allows access to cloud metadata endpoints (169.254.169.254, 168.63.129.16)")

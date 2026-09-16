@@ -2,11 +2,9 @@ package kntrl
 
 import rego.v1
 
-# wget to an allowed host should pass even if wget is not in allowed_processes.
-# This matches BPF behavior: IPs from allowed_hosts are in the kernel allowlist
-# for all processes.
-test_wget_to_allowed_host_passes if {
-	policy with input as {
+# A global host grant must not override the process allowlist.
+test_wget_to_allowed_host_blocked if {
+	not policy with input as {
 		"task_name": "wget",
 		"daddr": "52.222.201.14",
 		"dport": 443,
@@ -73,9 +71,9 @@ test_cdn_reverse_dns_not_in_allowed_hosts if {
 		with data.blocked_process_chains as []
 }
 
-# Wildcard host match: wget to subdomain of allowed pattern should pass.
-test_wget_to_wildcard_allowed_host if {
-	policy with input as {
+# Wildcard hosts must also respect the process allowlist.
+test_wget_to_wildcard_allowed_host_blocked if {
+	not policy with input as {
 		"task_name": "wget",
 		"daddr": "1.2.3.4",
 		"dport": 443,

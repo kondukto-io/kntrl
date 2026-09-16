@@ -45,13 +45,35 @@
  * Shared Map Definitions
  * ======================== */
 
-/* Map for allowed IP addresses from userspace */
+/* Permissions belong to one socket and destination, never a shared IP. */
+struct connection_key {
+	__u64 cookie;
+	__u8 address[16];
+	__u16 port;
+	__u8 protocol;
+	__u8 family;
+	__u32 pad;
+};
+
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__type(key, __u32);
+	__type(key, struct connection_key);
 	__type(value, __u32);
-	__uint(max_entries, MAX_ENTIRES);
-} allowed_ip_map SEC(".maps");
+	__uint(max_entries, 16384);
+} allowed_connections SEC(".maps");
+
+/* DNS permissions apply only to TCP/UDP destination port 53. */
+struct resolver_key {
+	__u8 address[16];
+	__u32 family;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, struct resolver_key);
+	__type(value, __u32);
+	__uint(max_entries, 64);
+} dns_resolvers SEC(".maps");
 
 /* Map for allowed hostnames from userspace */
 struct {
@@ -68,14 +90,6 @@ struct {
 	__type(value, __u32);
 	__uint(max_entries, 1);
 } mode_map SEC(".maps");
-
-/* Map for allowed IPv6 addresses */
-struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__uint(key_size, 16);
-	__type(value, __u32);
-	__uint(max_entries, MAX_ENTIRES);
-} allowed_ipv6_map SEC(".maps");
 
 /* Enable/disable flag for process monitoring */
 struct {

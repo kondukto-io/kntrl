@@ -118,14 +118,6 @@ static __always_inline void try_extract_sni(struct __sk_buff *skb, struct iphdr 
 			if (name_len == 0 || name_len >= MAX_HOSTNAME_LEN)
 				break;
 
-			/* Use stack buffer for variable ops — the verifier
-			 * forbids variable-index writes on ringbuf memory. */
-			char sni_buf[MAX_HOSTNAME_LEN];
-			__builtin_memset(sni_buf, 0, sizeof(sni_buf));
-			if (bpf_skb_load_bytes(skb, pos + 5, sni_buf, MAX_HOSTNAME_LEN - 1) < 0)
-				break;
-			sni_buf[name_len & 0xFF] = '\0';
-
 			struct sni_event_t *evt;
 			evt = bpf_ringbuf_reserve(&sni_events, sizeof(*evt), 0);
 			if (!evt)
@@ -135,7 +127,18 @@ static __always_inline void try_extract_sni(struct __sk_buff *skb, struct iphdr 
 			evt->pid = 0;
 			evt->daddr = iph->daddr;
 			evt->dport = bpf_ntohs(tcph.dest);
-			__builtin_memcpy(evt->sni, sni_buf, MAX_HOSTNAME_LEN);
+			__builtin_memset(evt->sni, 0, sizeof(evt->sni));
+			/* Keep a 64-bit length bound visible to the verifier at the call. */
+			__u64 read_len = name_len;
+			asm volatile("" : "+r"(read_len));
+			if (read_len == 0 || read_len >= MAX_HOSTNAME_LEN) {
+				bpf_ringbuf_discard(evt, 0);
+				break;
+			}
+			if (bpf_skb_load_bytes(skb, pos + 5, evt->sni, read_len) < 0) {
+				bpf_ringbuf_discard(evt, 0);
+				break;
+			}
 
 			bpf_ringbuf_submit(evt, 0);
 			break;
