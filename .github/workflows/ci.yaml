@@ -82,7 +82,7 @@ jobs:
       # Module scan needs no build, so it covers every dependency of the whole
       # module — including the packages ANALYZE_PKGS has to leave out.
       - name: Scan dependencies
-        run: govulncheck -scan module ./...
+        run: govulncheck -scan module
       # Symbol scan is precise (reports only vulnerabilities actually reachable
       # from our code) but requires type-checking, so it is limited to the
       # buildable packages.
