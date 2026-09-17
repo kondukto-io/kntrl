@@ -60,15 +60,21 @@ jobs:
           git diff --exit-code go.mod go.sum
           go mod verify
       - name: Go vet
-        run: go vet $ANALYZE_PKGS
+        run: |
+          read -r -a packages <<< "$ANALYZE_PKGS"
+          go vet "${packages[@]}"
       - name: Unit tests
-        run: go test -count=1 -race $ANALYZE_PKGS
+        run: |
+          read -r -a packages <<< "$ANALYZE_PKGS"
+          go test -count=1 -race "${packages[@]}"
       # Shares this job's warm build cache: nilaway type-checks the same
       # packages vet and test just compiled.
       - name: Install nilaway
-        run: go install go.uber.org/nilaway/cmd/nilaway@$NILAWAY_VERSION
+        run: go install "go.uber.org/nilaway/cmd/nilaway@$NILAWAY_VERSION"
       - name: Run nilaway
-        run: nilaway -exclude-test-files $ANALYZE_PKGS
+        run: |
+          read -r -a packages <<< "$ANALYZE_PKGS"
+          nilaway -exclude-test-files "${packages[@]}"
 
   govulncheck:
     name: Govulncheck
@@ -85,7 +91,7 @@ jobs:
           cache: true
           cache-dependency-path: ./go.sum
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION
+        run: go install "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION"
       # Module scan needs no build, so it covers every dependency of the whole
       # module — including the packages ANALYZE_PKGS has to leave out.
       - name: Scan dependencies
@@ -94,4 +100,6 @@ jobs:
       # from our code) but requires type-checking, so it is limited to the
       # buildable packages.
       - name: Scan reachable symbols
-        run: govulncheck $ANALYZE_PKGS
+        run: |
+          read -r -a packages <<< "$ANALYZE_PKGS"
+          govulncheck "${packages[@]}"
