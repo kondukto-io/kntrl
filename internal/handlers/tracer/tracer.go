@@ -20,6 +20,7 @@ import (
 	"io/fs"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -64,13 +65,12 @@ const (
 // group/name pairs. Each entry corresponds to a BPF program in the
 // compiled object file that should be attached to the specified tracepoint.
 var tracePointAttach = map[string][2]string{
-	"inet_sock_set_state": {"sock", "inet_sock_set_state"},
-	"trace_exec":          {"sched", "sched_process_exec"},
-	"trace_openat":        {"syscalls", "sys_enter_openat"},
-	"trace_renameat2":     {"syscalls", "sys_enter_renameat2"},
-	"trace_unlinkat":      {"syscalls", "sys_enter_unlinkat"},
-	"trace_faccessat":     {"syscalls", "sys_enter_faccessat"},
-	"trace_newfstatat":    {"syscalls", "sys_enter_newfstatat"},
+	"trace_exec":       {"sched", "sched_process_exec"},
+	"trace_openat":     {"syscalls", "sys_enter_openat"},
+	"trace_renameat2":  {"syscalls", "sys_enter_renameat2"},
+	"trace_unlinkat":   {"syscalls", "sys_enter_unlinkat"},
+	"trace_faccessat":  {"syscalls", "sys_enter_faccessat"},
+	"trace_newfstatat": {"syscalls", "sys_enter_newfstatat"},
 }
 
 // tracerRuntime holds the shared runtime state used by all event processing
@@ -88,10 +88,9 @@ type tracerRuntime struct {
 	monitoredPaths   []string
 	monitoredEnvVars []string
 
-	// allowedIPMap and allowedIPv6Map are eBPF maps that the IPv4/IPv6 event
-	// handlers update at runtime when policy evaluation allows a connection.
-	allowedIPMap   *ebpf.Map
-	allowedIPv6Map *ebpf.Map
+	// Serialize policy replacement with socket grant publication.
+	networkMu   sync.Mutex
+	connections *ebpf.Map
 }
 
 func init() {
@@ -151,12 +150,9 @@ func Run(cmd cobra.Command) error {
 		return err
 	}
 
-	allowedIPMap, err := getRequiredMap(ebpfClient, domain.EBPFCollectionMapAllowedIP)
+	connections, err := getRequiredMap(ebpfClient, domain.EBPFCollectionMapConnections)
 	if err != nil {
 		return err
-	}
-	if err := updateAllowedIPMaps(allowedIPMap, cmddata); err != nil {
-		return fmt.Errorf("failed to update allow ip map: %w", err)
 	}
 
 	allowedHostMap, err := getRequiredMap(ebpfClient, domain.EBPFCollectionMapAllowedHost)
@@ -173,27 +169,18 @@ func Run(cmd cobra.Command) error {
 		return fmt.Errorf("failed to create ringbuf reader for ipv4 events: %w", err)
 	}
 
-	allowedIPv6Map := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedIPv6]
-	if allowedIPv6Map != nil {
-		if err := updateAllowedIPv6Maps(allowedIPv6Map, cmddata); err != nil {
-			logger.Log.Warnf("failed to update allowed IPv6 map: %v", err)
-		}
-	}
-
 	ipv6Events := initOptionalRingBuf(ebpfClient, domain.EBPFCollectionMapIPV6Events)
 	processEvents := initProcessMonitor(ebpfClient, &cmd)
 	fileEvents, monitoredPaths, monitoredEnvVars := initFileMonitor(ebpfClient, &cmd, rulesFile, rulesDir)
 	dnsEvents := initOptionalRingBuf(ebpfClient, domain.EBPFCollectionMapDNSEvents)
 
 	// --- Populate auxiliary eBPF maps ---
-	populateDNSServerMap(ebpfClient, cmddata)
+	if err := populateDNSServerMap(ebpfClient, cmddata); err != nil {
+		return fmt.Errorf("configure DNS resolvers: %w", err)
+	}
 	populateSelfTGIDMap(ebpfClient)
 	populateBlockedExecMap(ebpfClient, cmddata)
 	populateProtectedPathsMap(ebpfClient, cmddata)
-
-	// Preload established TCP connections so existing sessions (e.g. SSH)
-	// are not disrupted when the egress BPF filter attaches.
-	preloadEstablishedConns(allowedIPMap, allowedIPv6Map)
 
 	// Remove memory lock restrictions for eBPF programs.
 	if err := rlimit.RemoveMemlock(); err != nil {
@@ -201,15 +188,19 @@ func Run(cmd cobra.Command) error {
 	}
 
 	// --- Attach eBPF programs to kernel hooks ---
-	cleanups, err := attachPrograms(ebpfClient)
-	if err != nil {
-		return err
+	cgroupPath, _ := cmd.Flags().GetString("cgroup-path")
+	if cgroupPath == "" {
+		cgroupPath = rootCgroup
 	}
+	cleanups, err := attachPrograms(ebpfClient, cgroupPath)
 	defer func() {
 		for _, fn := range cleanups {
 			fn()
 		}
 	}()
+	if err != nil {
+		return err
+	}
 
 	// --- Runtime state ---
 	var policyPtr atomic.Pointer[policy.Policy]
@@ -225,8 +216,7 @@ func Run(cmd cobra.Command) error {
 		cmddata:          cmddata,
 		monitoredPaths:   monitoredPaths,
 		monitoredEnvVars: monitoredEnvVars,
-		allowedIPMap:     allowedIPMap,
-		allowedIPv6Map:   allowedIPv6Map,
+		connections:      connections,
 	}
 
 	// Start async DNS resolution worker for reverse lookups.
@@ -241,8 +231,7 @@ func Run(cmd cobra.Command) error {
 
 	// SIGHUP: hot-reload configuration and policy without restarting.
 	go handleSIGHUP(sighupChan, &policyPtr, rulesFile, rulesDir, &cmd,
-		bundleFS, externalRegoFiles, allowedIPMap, allowedHostMap,
-		allowedIPv6Map, ebpfClient, rt)
+		bundleFS, externalRegoFiles, allowedHostMap, ebpfClient, rt)
 
 	// Graceful shutdown: close all ring buffer readers to unblock goroutines.
 	go handleShutdown(stopChan, done, ipV4Events, ipv6Events,
@@ -478,7 +467,7 @@ func initReporter(cmd *cobra.Command) *reporter.Reporter {
 // attachPrograms iterates over all eBPF programs in the loaded collection and
 // attaches each one to its appropriate kernel hook (kprobe, tracepoint, tracing,
 // or cgroup). Deferred cleanup ensures hooks are detached on shutdown.
-func attachPrograms(ebpfClient *ebpfman.EBPF) (cleanups []func(), retErr error) {
+func attachPrograms(ebpfClient *ebpfman.EBPF, cgroupPath string) (cleanups []func(), retErr error) {
 	for name, spec := range ebpfClient.Spec.Programs {
 		prg := ebpfClient.Collection.Programs[name]
 		logger.Log.WithFields(logrus.Fields{
@@ -516,15 +505,15 @@ func attachPrograms(ebpfClient *ebpfman.EBPF) (cleanups []func(), retErr error) 
 			}
 			cleanups = append(cleanups, func() { l.Close() })
 
-		case ebpf.CGroupSKB:
+		case ebpf.CGroupSKB, ebpf.CGroupSockAddr:
 			logger.Log.Infof("linking CGroupSKB [%s]", utils.ParseProgramName(prg))
-			cgroup, err := os.Open(rootCgroup)
+			cgroup, err := os.Open(cgroupPath)
 			if err != nil {
 				return cleanups, err
 			}
 			l, err := link.AttachCgroup(link.CgroupOptions{
 				Path:    cgroup.Name(),
-				Attach:  ebpf.AttachCGroupInetEgress,
+				Attach:  spec.AttachType,
 				Program: prg,
 			})
 			if err != nil {
@@ -550,7 +539,7 @@ func handleSIGHUP(
 	cmd *cobra.Command,
 	bundleFS fs.FS,
 	externalRegoFiles []string,
-	allowedIPMap, allowedHostMap, allowedIPv6Map *ebpf.Map,
+	allowedHostMap *ebpf.Map,
 	ebpfClient *ebpfman.EBPF,
 	rt *tracerRuntime,
 ) {
@@ -562,24 +551,28 @@ func handleSIGHUP(
 			continue
 		}
 
-		// Refresh all eBPF maps with the new configuration.
-		if err := updateAllowedIPMaps(allowedIPMap, newData); err != nil {
-			logger.Log.Errorf("SIGHUP: failed to update IP maps: %v", err)
+		rt.networkMu.Lock()
+		err = clearMap(rt.connections)
+		if err == nil {
+			err = populateDNSServerMap(ebpfClient, newData)
+		}
+		if err != nil {
+			rt.networkMu.Unlock()
+			logger.Log.Errorf("SIGHUP: failed to revoke network permissions: %v", err)
+			continue
+		}
+		if err := clearMap(allowedHostMap); err != nil {
+			logger.Log.Errorf("SIGHUP: clear host map: %v", err)
 		}
 		if err := updateAllowedHostMap(allowedHostMap, newData); err != nil {
-			logger.Log.Errorf("SIGHUP: failed to update host maps: %v", err)
-		}
-		if allowedIPv6Map != nil {
-			if err := updateAllowedIPv6Maps(allowedIPv6Map, newData); err != nil {
-				logger.Log.Errorf("SIGHUP: failed to update IPv6 maps: %v", err)
-			}
+			logger.Log.Errorf("SIGHUP: update host map: %v", err)
 		}
 		populateBlockedExecMap(ebpfClient, newData)
 		populateProtectedPathsMap(ebpfClient, newData)
-
 		rt.cmddata = newData
 		policyPtr.Store(newPolicy)
-		newPolicy.FlushCache()
+		rt.networkMu.Unlock()
+
 		logger.Log.Info("SIGHUP: policy reloaded successfully")
 	}
 }
@@ -598,4 +591,3 @@ func handleShutdown(stopChan chan os.Signal, done chan bool, readers ...*ringbuf
 		}
 	}
 }
-

@@ -5,6 +5,7 @@ import data.kntrl.network["is_github_range"] as rule
 # test local ip
 test_allow_github_meta {
 	rule.policy with input as {"daddr":"4.148.0.12", "domains": ["foo.bar"]}
+		with data.allow_github_meta as true
 }
 
 # test local ip
