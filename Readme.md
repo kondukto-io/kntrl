@@ -1,21 +1,21 @@
 ![kntrl logo](./docs/img/kntrl_logo_dark.svg) <!-- markdownlint-disable-line first-line-heading -->
 
-`kntrl` is an eBPF-based runtime security agent that monitors and controls network, process, DNS, TLS, and file activity on CI/CD runners and build pipelines. It hooks into kernel-level syscalls to enforce policies in real time — blocking supply-chain attacks, unauthorized network access, and anomalous process behaviour before they cause damage.
+`kntrl` is an eBPF-based runtime security agent for CI/CD runners and build pipelines. It observes network, process, DNS, TLS, and file activity and enforces network policies in the Linux kernel to limit unauthorized access during builds. Its protection depends on the configured policy and the scope of the monitored workload.
 
 Refer to this [presentation](https://docs.google.com/presentation/d/1nmbqGfIxp9UyxlfT5EJyQsEWtQaXVoWD9Qjj1MJevuk/edit?usp=sharing) for a deeper look at the architecture.
 
 ## Features
 
-- **Network monitoring & enforcement** — Intercepts IPv4/IPv6 TCP and UDP connections via eBPF kprobes. Allows or blocks based on destination IP, domain, CIDR range, and process identity.
+- **Network monitoring & enforcement** — Observes IPv4/IPv6 connections and UDP sends through cgroup socket hooks, then enforces policy at cgroup egress. Decisions use destination IP, domain, CIDR range, and process identity.
 - **DNS monitoring** — Captures DNS queries and responses at the kernel level. Tracks which domains each process resolves and restricts DNS server usage.
-- **TLS SNI inspection** — Extracts Server Name Indication from TLS ClientHello packets via eBPF TC hooks for accurate domain-based blocking even before the connection completes.
+- **TLS SNI observation** — Extracts visible Server Name Indication from IPv4 TLS ClientHello packets on TCP port 443 at cgroup egress to enrich the domain cache.
 - **Process ancestry tracking** — Monitors fork/exec events to build an in-memory process tree. Blocks connections when specific process chains are detected (e.g., block `curl` spawned by `npm`).
 - **File access monitoring** — Tracks file open events on sensitive paths (e.g., `/etc/shadow`, `/root/.ssh/`).
 - **Per-process network profiles** — Assign different allowed hosts per process (e.g., `npm` can only reach `registry.npmjs.org`).
-- **OPA policy engine** — All policy decisions use Open Policy Agent with embedded Rego rules. Extend or override with custom `.rego` files.
+- **OPA policy engine** — Evaluates network and process rules with embedded Rego policies. Extend with custom `.rego` files; the DNS port-53 exception is enforced separately in the kernel.
 - **Two operating modes** — `monitor` (log only) and `trace` (enforce and block).
 - **Webhook alerting** — Send block/pass events to external endpoints in real time.
-- **Socket-scoped enforcement** — A policy grant permits only one kernel socket and destination address/port/protocol, never other processes connecting to the same IP.
+- **Socket-scoped enforcement** — A policy grant permits one kernel socket and destination address/port/protocol. Another socket connecting to the same IP needs its own approval.
 - **SIGHUP live reload** — Reload YAML rules and flush policy caches without restarting.
 - **Daemon mode** — Run in the background with PID file management.
 
@@ -26,6 +26,8 @@ Refer to this [presentation](https://docs.google.com/presentation/d/1nmbqGfIxp9U
 - **Raw socket monitoring** — Detects creation of `AF_PACKET`, `IPPROTO_RAW`, and `IPPROTO_ICMP` sockets.
 - **No DNS auto-whitelisting** — DNS-resolved IPs require explicit policy approval before they enter the BPF allowlist.
 - **LRU BPF maps** — Auto-evicting hash maps prevent map overflow under high load.
+- **Restricted DNS exception** — TCP/UDP port 53 is permitted only to configured resolvers. Cloudflare and Google are the defaults; explicit resolver lists replace them.
+- **Release verification** — The release workflow signs the binary checksum manifest with keyless Cosign and publishes GitHub artifact attestations. Verify both the signature and binary checksums before execution.
 
 ### Performance
 
@@ -35,28 +37,73 @@ Refer to this [presentation](https://docs.google.com/presentation/d/1nmbqGfIxp9U
 
 ## Installation
 
+### Runtime requirements
+
+The agent requires Linux, cgroup v2, kernel BTF and the eBPF hooks used by its
+sensors. The current binary requires root; a container must also have permission
+to load and attach BPF programs and access the target cgroup and process metadata.
+Container UID 0 alone does not grant those host permissions.
+
+For a Kubernetes GitLab runner, an unprivileged, non-root build container cannot
+start the agent on its own. Deployment requires runner or cluster administrator
+support. The current implementation does not provide a ready-to-use, isolated
+per-build sidecar: `--cgroup-path` scopes cgroup network hooks, while process and
+file sensors are not all restricted to that subtree. Running in a pod does not
+by itself limit every sensor to that pod.
+
 ### Linux
 
-`kntrl` is available as a downloadable binary from the [releases](https://github.com/kondukto-io/kntrl/releases) page. Download the pre-compiled binary and copy it to the desired location.
+Download a selected tag from the [releases](https://github.com/kondukto-io/kntrl/releases) page:
 
-### Container Images
+| Asset | Purpose |
+| --- | --- |
+| `kntrl.amd64` | Linux x86-64 binary |
+| `kntrl_arm64.arm64` | Linux ARM64 binary |
+| `checksums.txt` | SHA256 digests of both binaries |
+| `checksums.txt.sigstore.json` | Cosign signature bundle for the checksum manifest |
 
-```
-docker pull kondukto/kntrl:latest
+The bundle is available only for releases produced by the new signing workflow;
+older releases are not retroactively signed. Follow the
+[download and verification instructions](docs/releases.md#verify-before-running)
+to download all four assets and check the exact release workflow/tag identity,
+the GitHub Actions OIDC issuer, and both binary checksums. Install only after
+both signature and checksum verification succeed:
+
+```bash
+# From the verified download directory, choose your architecture:
+sudo install -m 0755 ./kntrl.amd64 /usr/local/bin/kntrl
+# ARM64: sudo install -m 0755 ./kntrl_arm64.arm64 /usr/local/bin/kntrl
 ```
 
-To pull a specific version:
+### Release integrity
 
-```
-docker pull kondukto/kntrl:0.1.4
-```
+Tagged releases run CI before building. The build job has read-only repository
+permissions; a separate job signs `checksums.txt` using GitHub Actions OIDC and
+Cosign, verifies the signature, attests the assets, and publishes them. No
+long-lived signing key is stored. Signing or verification failures stop publication.
+
+The signature authenticates the checksum manifest; checking the manifest binds
+the downloaded binaries to that signature. See [release integrity](docs/releases.md)
+for the trust model and commands. GitHub Action and GitLab installers must adopt
+this verification separately; release signing alone does not make their installs
+verify signatures automatically.
+
+### Containers
+
+The current release workflow publishes binaries, checksums, and the signature
+bundle; it does not publish Docker images. The repository's [Dockerfile](Dockerfile)
+can package a verified binary named `kntrl` in its build context. Container
+deployment still requires the host permissions and visibility described above.
 
 ### Building from source
 
 ```bash
-make generate   # compile eBPF programs (requires clang, llvm, libelf-dev)
+make generate   # compile eBPF programs (defaults to clang-19)
 make build      # build the Go binary to build/kntrl
 ```
+
+Build on Linux with the Go version in [go.mod](go.mod), clang/LLVM, libelf headers,
+and `wget` available. `make build` downloads GitHub metadata for the policy bundle.
 
 ## Quick start
 
@@ -64,29 +111,21 @@ Start the agent in monitor mode during your CI/CD job:
 
 ```yaml
 - name: start kntrl agent
-  run: sudo ./kntrl start --mode=monitor --allowed-hosts=download.kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allowed-ips=10.0.2.3 --daemonize
+  run: sudo kntrl start --mode=monitor --allowed-hosts=github.com,download.kondukto.io --daemonize
 ```
 
 Stop and print the report:
 
 ```yaml
 - name: stop kntrl agent
-  run: sudo ./kntrl stop
+  if: always()
+  run: sudo kntrl stop
 ```
 
-Or with Docker:
-
-```yaml
-- name: kntrl agent
-  run: sudo docker run --privileged \
-    --pid=host \
-    --network=host \
-    --cgroupns=host \
-    --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
-    --volume /tmp:/tmp \
-    --rm docker.io/kondukto/kntrl:0.1.4 \
-    start --mode=trace --allowed-hosts=kondukto.io,download.kondukto.io
-```
+Monitor mode logs decisions and does not block traffic. Before enabling `trace`,
+configure the workload's required destinations and DNS resolvers, and choose the
+[network enforcement scope](#network-enforcement-scope). The default allows local
+IP ranges; use `--allow-local-ranges=false` when those should require explicit rules.
 
 ## CLI reference
 
@@ -110,6 +149,7 @@ Global flags:
 | Flag                     | Default          | Description                                                         |
 | ------------------------ | ---------------- | ------------------------------------------------------------------- |
 | `--mode`                 | `monitor`        | Operating mode: `monitor` (log only) or `trace` (enforce)           |
+| `--cgroup-path`          | `/sys/fs/cgroup`  | Existing cgroup v2 subtree for network enforcement; does not create or move the workload |
 | `--allowed-hosts`        |                  | Comma-separated allowed hostnames (e.g., `example.com,.github.com`) |
 | `--allowed-ips`          |                  | Comma-separated allowed IP addresses                                |
 | `--allow-local-ranges`   | `true`           | Allow local IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)   |
@@ -178,9 +218,12 @@ webhooks:
     filter: "block"
 ```
 
-See `examples/policy-v2.yaml` for a full example.
+See [examples/policy-v2.yaml](examples/policy-v2.yaml) for a full example. DNS
+resolvers are configured through `rules.dns.allowed_servers`; there is no
+dedicated DNS server CLI flag. The explicit Google resolver list above replaces
+the built-in Cloudflare and Google defaults.
 
-### Live reload
+### Network enforcement scope
 
 In `trace` mode, start the agent before the workload creates its sockets. Existing
 connections are no longer automatically trusted. TCP may wait for its first SYN
@@ -196,10 +239,16 @@ its file descriptor to another process. Run untrusted workloads without host
 administration privileges. Fragments, non-TCP/UDP packets, and IPv6 extension
 headers are denied in trace mode; monitor mode remains pass-through.
 
+For non-DNS traffic, process allowlists and blocked ancestry chains must also
+pass even when an IP, CIDR, local range, or GitHub range is allowed. Resolver
+traffic on port 53 uses its separate destination allowlist.
+
+### Live reload
+
 Send `SIGHUP` to the running agent to reload the YAML rules file and flush policy caches without restarting:
 
 ```bash
-kill -HUP $(cat /tmp/kntrl.pid)
+sudo kill -HUP "$(cat /var/run/kntrl.pid)"
 ```
 
 ## Process ancestry chain blocking
@@ -222,7 +271,8 @@ rules:
 With this rule:
 
 - `npm install` spawning `sh -> curl` to exfiltrate data is **blocked**
-- A user running `curl github.com` directly from a shell is **allowed**
+- A user running `curl github.com` directly from a shell is not blocked by this
+  ancestry rule; the network and process rules must still allow it.
 
 You can require multiple ancestors to be present:
 
@@ -267,6 +317,11 @@ disables the exception. Add your corporate resolver or local DNS stub explicitly
 if the workload uses one. kntrl does not rewrite system DNS settings or derive
 permissions from `/etc/resolv.conf`.
 
+CI integrations may supply their own explicit resolver lists. For a Kubernetes
+runner, configure the actual cluster DNS or NodeLocal DNS address used by the
+build pod; a public resolver list alone does not authorize that address. Keep any
+public resolvers you need in the same explicit list.
+
 This restricts resolver destinations; it does not validate DNS payloads or prevent
 DNS tunneling through an approved resolver. DNS-over-HTTPS/TLS uses ordinary
 network policy, not the port-53 exception.
@@ -296,7 +351,11 @@ github.com          | 8.8.8.8
 
 ## TLS SNI inspection
 
-`kntrl` uses eBPF TC (traffic control) hooks to inspect TLS ClientHello packets and extract the Server Name Indication (SNI) field. This allows domain-based policy enforcement even for encrypted connections, correlating the SNI with the network connection event.
+`kntrl` inspects IPv4 TCP port 443 traffic at cgroup egress for a visible TLS
+ClientHello SNI field and caches the hostname-to-IP association. This is a
+best-effort observation, not TLS decryption or a guarantee that SNI authorizes
+the initial connection: the TCP handshake precedes ClientHello, and the socket
+must already have network permission to complete it.
 
 ## File access monitoring
 
@@ -438,16 +497,13 @@ kntrl attaches the following eBPF programs to kernel hooks:
 
 | Hook                     | Type       | Purpose                         |
 | ------------------------ | ---------- | ------------------------------- |
-| `tcp_v4_connect`         | kprobe     | IPv4 TCP connection attempts    |
-| `ip4_datagram_connect`   | kprobe     | IPv4 UDP connection attempts    |
-| `tcp_v6_connect`         | kprobe     | IPv6 TCP connection attempts    |
-| `udpv6_sendmsg`          | kprobe     | IPv6 UDP sends                  |
+| `cgroup/connect4`, `cgroup/connect6` | cgroup socket address | IPv4/IPv6 connection attempts and socket identity |
+| `cgroup/sendmsg4`, `cgroup/sendmsg6` | cgroup socket address | IPv4/IPv6 UDP sends and socket identity |
+| `cgroup_skb/egress`      | cgroup skb | Socket/destination grants, resolver restrictions, and SNI observation |
 | `skb_consume_udp`        | kprobe     | DNS packet capture              |
-| `inet_sock_set_state`    | tracepoint | TCP state change tracking       |
 | `sched_process_exec`     | tracepoint | Process execution events        |
 | `sched_process_fork`     | tp_btf     | Process fork events             |
 | `security_socket_create` | kprobe     | Raw socket creation detection   |
-| TC classifier            | tc         | TLS SNI extraction from packets |
 
 All event data flows through eBPF ring buffers for efficient kernel-to-userspace communication. BPF maps use LRU eviction to prevent overflow under high load.
 
@@ -462,7 +518,14 @@ make test-all           # all tests (Docker)
 
 make test-unit-local    # unit tests (local, works on macOS)
 make test-rego-local    # OPA policy tests (local, requires opa CLI)
+go test -count=1 -race ./tests/release/... # release manifest and signing workflow checks
 ```
+
+CI also validates workflows and GoReleaser configuration, runs vet/Nilaway and
+unit tests, and exercises kernel DNS and socket isolation on Linux. Govulncheck
+reports module-level findings and blocks on reachable vulnerabilities across the
+application. Release workflow tests stub Cosign; live OIDC signing and signature
+verification run when a release tag triggers the workflow.
 
 ## Contribution
 
@@ -471,8 +534,8 @@ Feel free to join our Slack channel [https://kntrl.slack.com](https://kntrl.slac
 
 ## License
 
-Except for the eBPF code, all components are distributed under the [Apache License (version 2.0)](./LICENSE.md).
+Except for the eBPF code, all components are distributed under the [Apache License (version 2.0)](./LICENSE).
 
-## More about Kondukto
+## More about Invicti
 
-`kntrl` is an open source project maintained by [Kondukto](https://kondukto.io).
+This project is maintained by [Invicti](https://invicti.com).
