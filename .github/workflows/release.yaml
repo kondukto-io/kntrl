@@ -63,7 +63,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Attest and publish
+    name: Sign, attest and publish
     needs: build
     runs-on: ubuntu-24.04
     permissions:
@@ -77,6 +77,35 @@ jobs:
         with:
           name: kntrl-release-assets
           path: release
+      - name: Validate assets before signing
+        shell: bash
+        working-directory: release
+        run: |
+          for asset in kntrl.amd64 kntrl_arm64.arm64 checksums.txt; do
+            test -f "$asset"
+            test ! -L "$asset"
+          done
+          # Require exactly the two expected binaries, with matching digests.
+          # Do not let a build-provided manifest choose arbitrary paths to read.
+          sha256sum kntrl.amd64 kntrl_arm64.arm64 | LC_ALL=C sort > "$RUNNER_TEMP/expected-checksums.txt"
+          LC_ALL=C sort checksums.txt | cmp --silent "$RUNNER_TEMP/expected-checksums.txt" -
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+      - name: Sign and verify checksum manifest
+        shell: bash
+        working-directory: release
+        env:
+          RELEASE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yaml@${{ github.ref }}
+        run: |
+          cosign sign-blob --yes \
+            --bundle checksums.txt.sigstore.json checksums.txt
+          cosign verify-blob \
+            --bundle checksums.txt.sigstore.json \
+            --certificate-identity "$RELEASE_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            checksums.txt
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
         with:
@@ -86,4 +115,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" release/kntrl.amd64 release/kntrl_arm64.arm64 release/checksums.txt --verify-tag --title "$RELEASE_TAG" --generate-notes
+        run: |
+          gh release create "$RELEASE_TAG" \
+            release/kntrl.amd64 release/kntrl_arm64.arm64 \
+            release/checksums.txt release/checksums.txt.sigstore.json \
+            --verify-tag --title "$RELEASE_TAG" --generate-notes
