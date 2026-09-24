@@ -4,8 +4,19 @@ import rego.v1
 
 default policy = false
 
-# Network is allowed if any network rule passes
+# A process profile restricts rather than expands global network permissions.
+has_process_profile if {
+	input.task_name == data.process_profiles[_].process
+}
+
 network_allowed if {
+	has_process_profile
+	data.kntrl.network["is_process_profile"].policy
+}
+
+# Global rules apply only when no process profile is configured.
+network_allowed if {
+	not has_process_profile
 	data.kntrl.network[_].policy
 }
 
@@ -22,13 +33,6 @@ process_allowed if {
 # Process is allowed if the task name is in the allowlist
 process_allowed if {
 	input.task_name == data.allowed_processes[_]
-}
-
-# Process is allowed if the destination is an explicitly allowed host.
-# This matches the BPF cgroup filter: IPs resolved from allowed_hosts are
-# pre-populated in the kernel allowlist for ALL processes, so OPA must agree.
-process_allowed if {
-	data.kntrl.network["is_allowed_hosts"].policy
 }
 
 # Final policy: network and process must be allowed, ancestry must not be denied

@@ -7,14 +7,24 @@
 # vim: set ts=2 sw=2 tw=0 fo=cnqoj
 
 version: 2
+release:
+  github:
+    owner: kondukto-io
+    name: kntrl
 before:
   hooks:
     # You may remove this if you don't use go modules.
-    - go mod tidy
+    - go mod download
+    - go mod verify
     - make generate
 
 builds:
   - id: "kntrl"
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -mod=readonly
+      - -trimpath
     goos:
       - linux
     goarch:
@@ -38,6 +48,9 @@ archives:
     files:
       - Readme.md 
       - LICENSE
+
+checksum:
+  name_template: checksums.txt
 
 changelog:
   sort: asc

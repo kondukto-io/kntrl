@@ -1,8 +1,8 @@
 name: CI
 
 on:
+  workflow_call:
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 
@@ -20,12 +20,53 @@ env:
   NILAWAY_VERSION: v0.0.0-20260915122131-cb17e847f492
 
 jobs:
+  workflow-lint:
+    name: Workflow and release configuration
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b
+        with:
+          go-version-file: go.mod
+      - name: Validate workflows
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          actionlint -color
+      - name: Validate release configuration
+        uses: goreleaser/goreleaser-action@9c156ee8a17a598857849441385a2041ef570552
+        with:
+          version: v2.18.1
+          args: check
+
+  network-enforcement:
+    name: Kernel network enforcement
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b
+        with:
+          go-version-file: go.mod
+      - name: Compile eBPF and regression tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang
+          clang -target bpf -D__TARGET_ARCH_x86 -O2 -g -Wall -Werror -I bpf/headers -c bpf/sensor.bpf.c -o internal/handlers/tracer/bpf_x86_bpfel.o
+          go test -c -tags=ebpf -o /tmp/kntrl-network-tests ./internal/handlers/tracer
+      - name: Verify kernel DNS and socket isolation
+        run: sudo /tmp/kntrl-network-tests -test.v -test.run='Test(DNSEgress|SocketGrantIsolation)$' -test.timeout=60s
+
   vet-and-test:
     name: Vet & Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
       - name: Set up Go
         uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
         with:
@@ -36,10 +77,15 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
+          go mod verify
       - name: Go vet
-        run: go vet $ANALYZE_PKGS
+        run: |
+          read -r -a packages <<< "$ANALYZE_PKGS"
+          go vet "${packages[@]}"
       - name: Unit tests
-        run: go test -count=1 -race $ANALYZE_PKGS
+        run: |
+          read -r -a packages <<< "$ANALYZE_PKGS"
+          go test -count=1 -race "${packages[@]}"
 
   # Keep this separate: branch protection requires a check named "Nilaway".
   nilaway:
@@ -48,6 +94,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
       - name: Set up Go
         uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
         with:
@@ -55,9 +103,11 @@ jobs:
           cache: true
           cache-dependency-path: ./go.sum
       - name: Install nilaway
-        run: go install go.uber.org/nilaway/cmd/nilaway@$NILAWAY_VERSION
+        run: go install "go.uber.org/nilaway/cmd/nilaway@$NILAWAY_VERSION"
       - name: Run nilaway
-        run: nilaway -exclude-test-files $ANALYZE_PKGS
+        run: |
+          read -r -a packages <<< "$ANALYZE_PKGS"
+          nilaway -exclude-test-files "${packages[@]}"
 
   govulncheck:
     name: Govulncheck
@@ -65,6 +115,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
       - name: Set up Go
         uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
         with:
@@ -72,10 +124,9 @@ jobs:
           cache: true
           cache-dependency-path: ./go.sum
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION
-      # Module findings include packages we never import (e.g. x/crypto/openpgp).
-      # JSON reports all findings without failing on vulnerability findings;
-      # operational errors still fail. The symbol scan below is the blocking gate.
+        run: go install "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION"
+      # Module findings may concern code we never use. Keep them visible without
+      # blocking PRs or releases; scanner errors and reachable findings still fail.
       # Module-only scanning does not accept package patterns.
       - name: Report module vulnerabilities (informational)
         run: govulncheck -scan module -format json

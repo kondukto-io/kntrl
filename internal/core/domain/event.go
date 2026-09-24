@@ -2,11 +2,12 @@ package domain
 
 // Event is a common event interface
 type Event struct {
-	TsUs  uint64   //
-	Pid   uint32   // process id
-	Af    uint16   // Address Family
-	Task  [16]byte // task name
-	Proto uint8    // Protocol name
+	TsUs   uint64   //
+	Cookie uint64   // kernel socket identity
+	Pid    uint32   // process id
+	Af     uint16   // Address Family
+	Task   [16]byte // task name
+	Proto  uint8    // Protocol name
 }
 
 // IP4Event represents a socket connect event from AF_INET(4)

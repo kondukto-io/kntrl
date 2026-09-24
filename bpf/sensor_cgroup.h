@@ -1,98 +1,69 @@
 #ifndef SENSOR_CGROUP_H
 #define SENSOR_CGROUP_H
 
-/* ========================
- * Cgroup Egress Filter
- * ======================== */
-
-/* Extract the destination port from the L4 header (TCP or UDP).
- * Returns 0 if the protocol is not TCP/UDP or on parse failure. */
-static __always_inline __u16 get_dst_port(struct __sk_buff *skb, struct iphdr *iph) {
-	__u32 l4_off = iph->ihl * 4;
-	if (iph->protocol == IPPROTO_TCP || iph->protocol == IPPROTO_UDP) {
-		__u16 dport;
-		if (bpf_skb_load_bytes(skb, l4_off + 2, &dport, sizeof(dport)) < 0)
-			return 0;
-		return __bpf_ntohs(dport);
+/* Fragments and unsupported IPv6 extension chains fail closed. */
+static __always_inline bool packet_destination(struct __sk_buff *skb,
+					      struct connection_key *key) {
+	struct iphdr ip4 = {};
+	if (bpf_skb_load_bytes(skb, 0, &ip4, sizeof(ip4)) < 0)
+		return false;
+	__u32 offset;
+	if (ip4.version == 4) {
+		if (ip4.ihl < 5 || (ip4.frag_off & bpf_htons(0x3fff)))
+			return false;
+		key->family = AF_INET;
+		key->protocol = ip4.protocol;
+		__builtin_memcpy(key->address, &ip4.daddr, 4);
+		offset = ip4.ihl * 4;
+	} else if (ip4.version == 6) {
+		struct ipv6hdr ip6 = {};
+		if (bpf_skb_load_bytes(skb, 0, &ip6, sizeof(ip6)) < 0)
+			return false;
+		key->family = AF_INET6;
+		key->protocol = ip6.nexthdr;
+		__builtin_memcpy(key->address, &ip6.daddr, 16);
+		offset = sizeof(ip6);
+	} else {
+		return false;
 	}
-	return 0;
+	if (key->protocol != IPPROTO_TCP && key->protocol != IPPROTO_UDP)
+		return false;
+	__u16 port;
+	if (bpf_skb_load_bytes(skb, offset + 2, &port, sizeof(port)) < 0)
+		return false;
+	key->port = bpf_ntohs(port);
+	return true;
 }
 
-/* Returns true to let the packet through, false to drop it. */
-static __always_inline bool handle_pkt(struct __sk_buff *skb, bool egress) {
-	struct iphdr iph;
-	bpf_skb_load_bytes(skb, 0, &iph, sizeof(struct iphdr));
+static __always_inline bool handle_pkt(struct __sk_buff *skb) {
+	__u32 zero = 0;
+	__u32 *mode = bpf_map_lookup_elem(&mode_map, &zero);
+	bool enforce = !mode || *mode == MODE_ALLOW;
 
-	/* Anything that is not IPv4/IPv6 is passed untouched. */
-	if (iph.version != 4 && iph.version != 6)
+	struct connection_key key = {};
+	if (!packet_destination(skb, &key))
+		return !enforce;
+
+	if (key.family == AF_INET && key.protocol == IPPROTO_TCP && key.port == 443) {
+		struct iphdr ip4 = {};
+		if (bpf_skb_load_bytes(skb, 0, &ip4, sizeof(ip4)) == 0)
+			try_extract_sni(skb, &ip4);
+	}
+	if (!enforce)
 		return true;
-
-	if (iph.version == 4) {
-		__u16 dport = get_dst_port(skb, &iph);
-
-		/* Always allow DNS traffic (port 53) — DNS is monitored
-		 * separately by the DNS event hooks, and blocking DNS here
-		 * would prevent all name resolution from working. */
-		if (dport == 53)
-			return true;
-
-		/* Try to extract TLS SNI from egress TCP packets on port 443 */
-		if (egress && dport == 443)
-			try_extract_sni(skb, &iph);
+	/* DNS checks precede every policy grant, including explicit IP grants. */
+	if (key.port == 53) {
+		struct resolver_key resolver = {.family = key.family};
+		__builtin_memcpy(resolver.address, key.address, sizeof(resolver.address));
+		return bpf_map_lookup_elem(&dns_resolvers, &resolver) != NULL;
 	}
-
-	/* Only allow-list mode enforces; in monitor mode everything passes, so
-	 * skip the allow-list lookups entirely. */
-	__u32 key = 0;
-	__u32 *mode = bpf_map_lookup_elem(&mode_map, &key);
-	if (!mode || *mode != MODE_ALLOW)
-		return true;
-
-	if (iph.version == 4)
-		return bpf_map_lookup_elem(&allowed_ip_map, &iph.saddr) ||
-		       bpf_map_lookup_elem(&allowed_ip_map, &iph.daddr);
-
-	struct ipv6hdr ip6h;
-	bpf_skb_load_bytes(skb, 0, &ip6h, sizeof(ip6h));
-
-	return bpf_map_lookup_elem(&allowed_ipv6_map, &ip6h.saddr) ||
-	       bpf_map_lookup_elem(&allowed_ipv6_map, &ip6h.daddr);
-}
-
-/* ========================
- * Cgroup BPF Programs
- * ======================== */
-
-SEC("tracepoint/sock/inet_sock_set_state")
-int inet_sock_set_state(void *ctx) {
-	struct trace_event_raw_inet_sock_set_state args = {};
-	if (bpf_core_read(&args, sizeof(args), ctx) < 0) {
-		return 0;
-	}
-
-	if (BPF_CORE_READ(&args, protocol) != IPPROTO_TCP) {
-		return 0;
-	}
-
-	int oldstate;
-
-	oldstate = BPF_CORE_READ(&args, oldstate);
-
-	u8 daddr[16];
-	__builtin_memcpy(&daddr, &args.daddr, sizeof(daddr));
-
-	__u32 val = 0;
-
-	if (oldstate == BPF_TCP_ESTABLISHED) {
-		bpf_map_update_elem(&allowed_ip_map, &daddr, &val, BPF_ANY);
-	}
-
-	return 0;
+	key.cookie = bpf_get_socket_cookie(skb);
+	if (!key.cookie)
+		return false;
+	return bpf_map_lookup_elem(&allowed_connections, &key) != NULL;
 }
 
 SEC("cgroup_skb/egress")
-int egress(struct __sk_buff *skb) {
-	return (int)handle_pkt(skb, true);
-}
+int egress(struct __sk_buff *skb) { return handle_pkt(skb); }
 
-#endif /* SENSOR_CGROUP_H */
+#endif
