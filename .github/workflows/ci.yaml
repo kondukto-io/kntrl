@@ -12,8 +12,8 @@ permissions:
 env:
   # Packages that build without the generated eBPF object. `internal/handlers/tracer`
   # embeds bpf_x86_bpfel.o, which is gitignored and produced by `make generate`
-  # (needs the clang toolchain). The vet-and-test job skips code generation;
-  # define its package set once so vet, test and nilaway cannot drift apart.
+  # (needs the clang toolchain). Vet/test and nilaway skip code generation;
+  # define their package set once so these checks cannot drift apart.
   ANALYZE_PKGS: ./pkg/... ./internal/core/...
   # Analysis tools are pinned, like every action SHA below. Bump deliberately.
   GOVULNCHECK_VERSION: v1.8.0
@@ -21,7 +21,7 @@ env:
 
 jobs:
   vet-and-test:
-    name: Vet, Test & Nilaway
+    name: Vet & Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -40,8 +40,20 @@ jobs:
         run: go vet $ANALYZE_PKGS
       - name: Unit tests
         run: go test -count=1 -race $ANALYZE_PKGS
-      # Shares this job's warm build cache: nilaway type-checks the same
-      # packages vet and test just compiled.
+
+  # Keep this separate: branch protection requires a check named "Nilaway".
+  nilaway:
+    name: Nilaway
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Set up Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: ./go.sum
       - name: Install nilaway
         run: go install go.uber.org/nilaway/cmd/nilaway@$NILAWAY_VERSION
       - name: Run nilaway
