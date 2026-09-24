@@ -1,11 +1,9 @@
 package config
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"net"
-	"os"
 	"strings"
 
 	"github.com/kondukto-io/kntrl/internal/core/domain"
@@ -22,17 +20,12 @@ const (
 // ToOPAData converts a PolicyConfig into the JSON byte slice expected by policy.New().
 // It performs system enrichment: DNS servers, loopback IPs, host-to-IP resolution.
 func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
-	hosts, dnsIPs := getDNSServers()
-
-	// Merge configured hosts
-	hosts = append(hosts, cfg.Rules.Network.AllowedHosts...)
+	hosts := cfg.Rules.Network.AllowedHosts
 
 	// Parse IPs: separate exact IPs from CIDRs
 	var ips []net.IP
+	var ipv6s []net.IP
 	var cidrs []string
-
-	// Add DNS server IPs
-	ips = append(ips, dnsIPs...)
 
 	// Parse configured IPs/CIDRs
 	for _, ipStr := range cfg.Rules.Network.AllowedIPs {
@@ -43,14 +36,17 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 		if strings.Contains(ipStr, "/") {
 			cidrs = append(cidrs, ipStr)
 		} else if ip := net.ParseIP(ipStr); ip != nil {
-			ips = append(ips, ip.To4())
+			if v4 := ip.To4(); v4 != nil {
+				ips = append(ips, v4)
+			} else {
+				ipv6s = append(ipv6s, ip.To16())
+			}
 		}
 	}
 
 	// Resolve hosts to IPs (both IPv4 and IPv6)
 	v4, v6 := host2ip(hosts)
 	ips = append(ips, v4...)
-	var ipv6s []net.IP
 	ipv6s = append(ipv6s, v6...)
 
 	// Append system IPs (loopback always allowed)
@@ -97,9 +93,9 @@ func ToOPAData(cfg *PolicyConfig) ([]byte, *domain.Data, error) {
 
 	// Parse allowed DNS servers
 	var allowedDNSServers []net.IP
-	for _, s := range cfg.Rules.DNS.AllowedServers {
+	for _, s := range dnsServers(cfg.Rules.DNS) {
 		if ip := net.ParseIP(strings.TrimSpace(s)); ip != nil {
-			allowedDNSServers = append(allowedDNSServers, ip.To4())
+			allowedDNSServers = append(allowedDNSServers, ip)
 		}
 	}
 
@@ -167,30 +163,4 @@ func host2ip(hosts []string) (ipv4s []net.IP, ipv6s []net.IP) {
 		}
 	}
 	return
-}
-
-func getDNSServers() (hosts []string, ips []net.IP) {
-	const resolvconf = "/etc/resolv.conf"
-
-	file, err := os.Open(resolvconf)
-	if err != nil {
-		return nil, nil
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fields := strings.Fields(line)
-
-		if len(fields) >= 2 && fields[0] == "nameserver" {
-			if ok := net.ParseIP(fields[1]); ok == nil {
-				hosts = append(hosts, fields[1])
-			} else {
-				ips = append(ips, net.ParseIP(fields[1]))
-			}
-		}
-	}
-
-	return hosts, ips
 }

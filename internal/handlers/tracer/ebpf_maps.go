@@ -5,18 +5,12 @@ package tracer
 // userspace (this tracer) and the BPF programs running in the kernel.
 //
 // Map categories:
-//   - Allow lists: IPs, IPv6 addresses, hostnames, DNS servers
+//   - Network state: socket grants, hostname observations, DNS resolvers
 //   - Block lists: executable names, protected file paths
 //   - Control: self TGID (to skip self-generated events)
-//   - Preloaded state: existing TCP connections preserved across BPF attach
 
 import (
-	"bufio"
-	"encoding/binary"
-	"net"
 	"os"
-	"strconv"
-	"strings"
 
 	"github.com/cilium/ebpf"
 
@@ -24,39 +18,6 @@ import (
 	ebpfman "github.com/kondukto-io/kntrl/pkg/ebpf"
 	"github.com/kondukto-io/kntrl/pkg/logger"
 )
-
-// updateAllowedIPMaps writes all configured allowed IPv4 addresses into the
-// BPF map so that the kernel-side egress filter can allow them without
-// bouncing to userspace for policy evaluation.
-func updateAllowedIPMaps(allowedIPMap *ebpf.Map, arg *domain.Data) error {
-	for _, ipstr := range arg.AllowedIPs {
-		ip := ipstr.To4()
-		if ip == nil || len(ip) < 4 {
-			continue
-		}
-		ipUint32 := binary.LittleEndian.Uint32(ip[:4])
-		if err := allowedIPMap.Put(ipUint32, uint32(1)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// updateAllowedIPv6Maps writes all configured allowed IPv6 addresses into the
-// BPF map as 16-byte keys.
-func updateAllowedIPv6Maps(allowedIPv6Map *ebpf.Map, arg *domain.Data) error {
-	for _, ip := range arg.AllowedIPv6s {
-		if len(ip) != net.IPv6len {
-			continue
-		}
-		var key [16]byte
-		copy(key[:], ip)
-		if err := allowedIPv6Map.Put(key, uint32(1)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 // updateAllowedHostMap writes all allowed hostnames into the BPF map as
 // fixed-size 256-byte keys (NUL-padded).
@@ -71,21 +32,42 @@ func updateAllowedHostMap(allowedHostMap *ebpf.Map, arg *domain.Data) error {
 	return nil
 }
 
-// populateDNSServerMap writes the list of allowed DNS server IPs into the BPF
-// map so that DNS traffic to these servers is not blocked.
-func populateDNSServerMap(ebpfClient *ebpfman.EBPF, cmddata *domain.Data) {
-	allowedDNSServersMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedDNSServers]
-	if allowedDNSServersMap == nil || cmddata.AllowedDNSServers == nil {
-		return
+// populateDNSServerMap replaces the DNS exception, including on policy reload.
+func populateDNSServerMap(ebpfClient *ebpfman.EBPF, cmddata *domain.Data) error {
+	m, err := getRequiredMap(ebpfClient, domain.EBPFCollectionMapDNSResolvers)
+	if err != nil {
+		return err
+	}
+	if err := clearMap(m); err != nil {
+		return err
 	}
 	for _, ip := range cmddata.AllowedDNSServers {
-		ipv4 := ip.To4()
-		if ipv4 == nil {
-			continue
+		key := domain.DNSResolverKey{Family: 10}
+		if v4 := ip.To4(); v4 != nil {
+			key.Family = 2
+			copy(key.Address[:], v4)
+		} else {
+			copy(key.Address[:], ip.To16())
 		}
-		ipUint32 := binary.LittleEndian.Uint32(ipv4)
-		if err := allowedDNSServersMap.Put(ipUint32, uint32(1)); err != nil {
-			logger.Log.Warnf("failed to update allowed DNS server: %v", err)
+		if err := m.Put(key, uint32(1)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// clearMap revokes grants rather than allowing stale permissions to survive.
+func clearMap(m *ebpf.Map) error {
+	for {
+		key, err := m.NextKeyBytes(nil)
+		if err != nil {
+			return err
+		}
+		if key == nil {
+			return nil
+		}
+		if err := m.Delete(key); err != nil {
+			return err
 		}
 	}
 }
@@ -133,125 +115,4 @@ func populateProtectedPathsMap(ebpfClient *ebpfman.EBPF, cmddata *domain.Data) {
 			logger.Log.Warnf("failed to update protected paths map: %v", err)
 		}
 	}
-}
-
-// preloadEstablishedConns reads /proc/net/tcp and /proc/net/tcp6 to discover
-// active ESTABLISHED connections and pre-populates the BPF allowed IP maps.
-// This ensures that existing sessions (e.g. SSH connections used to manage the
-// host) survive when the egress BPF filter is attached.
-func preloadEstablishedConns(allowedIPMap, allowedIPv6Map *ebpf.Map) {
-	v4 := preloadTCP4(allowedIPMap)
-	var v6 int
-	if allowedIPv6Map != nil {
-		v6 = preloadTCP6(allowedIPv6Map)
-	}
-	if v4+v6 > 0 {
-		logger.Log.Infof("preloaded %d established connections (IPv4=%d, IPv6=%d)", v4+v6, v4, v6)
-	}
-}
-
-// preloadTCP4 parses /proc/net/tcp for ESTABLISHED (state 01) connections and
-// adds their remote IPv4 addresses to the BPF allowed IP map.
-func preloadTCP4(m *ebpf.Map) int {
-	f, err := os.Open("/proc/net/tcp")
-	if err != nil {
-		logger.Log.Debugf("preloadTCP4: %v", err)
-		return 0
-	}
-	defer f.Close()
-
-	var count int
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) < 4 {
-			continue
-		}
-		// Field 3 is the connection state; "01" = TCP_ESTABLISHED.
-		if fields[3] != "01" {
-			continue
-		}
-		// Field 2 is rem_address in hex format "XXXXXXXX:PPPP".
-		parts := strings.SplitN(fields[2], ":", 2)
-		if len(parts) < 1 || len(parts[0]) != 8 {
-			continue
-		}
-		ipHex, err := strconv.ParseUint(parts[0], 16, 32)
-		if err != nil {
-			continue
-		}
-		ipUint32 := uint32(ipHex)
-		if ipUint32 == 0 { // Skip 0.0.0.0
-			continue
-		}
-		if err := m.Put(ipUint32, uint32(1)); err != nil {
-			logger.Log.Debugf("preloadTCP4: put failed: %v", err)
-		} else {
-			count++
-		}
-	}
-	return count
-}
-
-// preloadTCP6 parses /proc/net/tcp6 for ESTABLISHED (state 01) connections and
-// adds their remote IPv6 addresses to the BPF allowed IPv6 map.
-func preloadTCP6(m *ebpf.Map) int {
-	f, err := os.Open("/proc/net/tcp6")
-	if err != nil {
-		logger.Log.Debugf("preloadTCP6: %v", err)
-		return 0
-	}
-	defer f.Close()
-
-	var count int
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) < 4 {
-			continue
-		}
-		if fields[3] != "01" {
-			continue
-		}
-		parts := strings.SplitN(fields[2], ":", 2)
-		if len(parts) < 1 || len(parts[0]) != 32 {
-			continue
-		}
-		hexStr := parts[0]
-
-		// Parse 32-char hex into [16]byte.
-		// /proc/net/tcp6 stores each 4-byte group in host (little-endian) order,
-		// so we reverse each group to get network byte order for the BPF map key.
-		var addr [16]byte
-		for i := 0; i < 4; i++ {
-			group := hexStr[i*8 : i*8+8]
-			for j := 0; j < 4; j++ {
-				b, err := strconv.ParseUint(group[j*2:j*2+2], 16, 8)
-				if err != nil {
-					break
-				}
-				// Reverse within each 4-byte group.
-				addr[i*4+(3-j)] = byte(b)
-			}
-		}
-
-		// Skip all-zeros (::).
-		allZero := true
-		for _, b := range addr {
-			if b != 0 {
-				allZero = false
-				break
-			}
-		}
-		if allZero {
-			continue
-		}
-
-		if err := m.Put(addr, uint32(1)); err != nil {
-			logger.Log.Debugf("preloadTCP6: put failed: %v", err)
-		} else {
-			count++
-		}
-	}
-	return count
 }

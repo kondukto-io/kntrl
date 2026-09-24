@@ -3,8 +3,10 @@ package domain
 // EBPFCollectionMapMode is the mode of the EBPF collection map
 const EBPFCollectionMapMode = "mode_map"
 
-// EBPFCollectionMapAllowedIP is the allow list of the EBPF collection map
-const EBPFCollectionMapAllowedIP = "allowed_ip_map"
+// EBPFCollectionMapConnections holds socket-scoped policy grants.
+const EBPFCollectionMapConnections = "allowed_connections"
+
+const EBPFCollectionMapDNSResolvers = "dns_resolvers"
 
 // EBPFCollectionMapAllowedHost is the allow list of the EBPF collection map
 const EBPFCollectionMapAllowedHost = "allowed_hosts_map"
@@ -14,9 +16,6 @@ const EBPFCollectionMapIPV4Events = "ipv4_events"
 
 // EBPFCollectionMapIPV6Events is the IPv6 events ring buffer
 const EBPFCollectionMapIPV6Events = "ipv6_events"
-
-// EBPFCollectionMapAllowedIPv6 is the allow list for IPv6 addresses
-const EBPFCollectionMapAllowedIPv6 = "allowed_ipv6_map"
 
 // EBPFCollectionMapSNIEvents is the TLS SNI events ring buffer
 const EBPFCollectionMapSNIEvents = "sni_events"

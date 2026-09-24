@@ -18,7 +18,7 @@ func TestEBPFLoad(t *testing.T) {
 
 	requiredMaps := []string{
 		domain.EBPFCollectionMapMode,
-		domain.EBPFCollectionMapAllowedIP,
+		domain.EBPFCollectionMapConnections,
 		domain.EBPFCollectionMapAllowedHost,
 		domain.EBPFCollectionMapIPV4Events,
 	}
@@ -51,29 +51,5 @@ func TestModeMapUpdate(t *testing.T) {
 	}
 	if val != uint32(domain.TracerModeIndexTrace) {
 		t.Errorf("expected mode %d, got %d", domain.TracerModeIndexTrace, val)
-	}
-}
-
-func TestAllowedIPMapUpdate(t *testing.T) {
-	var ebpfClient = ebpfman.New()
-	if err := ebpfClient.Load(prog); err != nil {
-		t.Fatalf("failed to load ebpf program: %s", err)
-	}
-	defer ebpfClient.Clean()
-
-	allowedIPMap := ebpfClient.Collection.Maps[domain.EBPFCollectionMapAllowedIP]
-
-	// Add an IP to the allowed list
-	var testIP uint32 = 0x0100007F // 127.0.0.1 in little-endian
-	if err := allowedIPMap.Put(testIP, uint32(1)); err != nil {
-		t.Fatalf("failed to put IP in allowed map: %v", err)
-	}
-
-	var val uint32
-	if err := allowedIPMap.Lookup(testIP, &val); err != nil {
-		t.Fatalf("failed to lookup IP in allowed map: %v", err)
-	}
-	if val != 1 {
-		t.Errorf("expected value 1, got %d", val)
 	}
 }

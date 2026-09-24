@@ -3,11 +3,10 @@ package tracer
 // events_network.go handles IPv4 and IPv6 network connection events from the
 // eBPF ring buffers. For each connection event, it resolves the destination IP
 // to a domain name (using the DNS cache or reverse DNS), evaluates the OPA
-// policy, and either allows or blocks the connection by updating the BPF map.
+// policy, and publishes or revokes a grant for that socket and destination.
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 
@@ -25,9 +24,9 @@ import (
 //
 // For each event it:
 //  1. Resolves the destination IP to domain name(s) via cached DNS
-//  2. Skips DNS traffic (port 53) since that's handled by the DNS monitor
+//  2. Checks DNS traffic against the configured resolver list
 //  3. Evaluates OPA policy in trace mode (pass-through in monitor mode)
-//  4. Updates the BPF allowed-IP map for passing connections
+//  4. Updates the socket-scoped BPF grant map
 //  5. Reports the event to file, cloud, and webhooks
 func (rt *tracerRuntime) ipv4EventLoop(reader *ringbuf.Reader) {
 	for {
@@ -53,20 +52,12 @@ func (rt *tracerRuntime) ipv4EventLoop(reader *ringbuf.Reader) {
 			domainNames = append(domainNames, ".")
 		}
 
-		// Skip DNS traffic — already captured by the DNS event monitor.
-		if event.Dport == 53 {
-			continue
-		}
-
 		// Resolve the actual executable name from /proc/<pid>/exe, falling
 		// back to the kernel-reported task name.
 		var policyStatus = domain.EventPolicyStatusPass
 		taskname := utils.TrimNullBytes(event.Task)
 		if exeName := utils.ResolveCommFromExe(event.Pid); exeName != "" {
 			taskname = exeName
-		}
-		if taskname == progName {
-			continue
 		}
 
 		protocol := utils.GetProtocol(event.Proto)
@@ -82,23 +73,14 @@ func (rt *tracerRuntime) ipv4EventLoop(reader *ringbuf.Reader) {
 			Ancestors:          rt.procTree.GetAncestors(event.Pid, 32),
 		}
 
-		// In trace mode, evaluate OPA policy and update the BPF allow map
-		// for connections that pass. In monitor mode, everything passes.
 		if rt.tracerMode != domain.TracerModeMonitor {
-			result, err := rt.policyPtr.Load().EvalEventCached(context.Background(), reportEvent)
+			result, err := rt.evaluateConnection(reportEvent, event.Cookie, event.Proto)
+			policyStatus = domain.EventPolicyStatusBlock
 			if err != nil {
-				logger.Log.Warnf("policy eval failed (skipping): %v", err)
-				continue
+				logger.Log.Warnf("connection policy failed: %v", err)
 			}
 			if result {
 				policyStatus = domain.EventPolicyStatusPass
-				if err := rt.allowedIPMap.Put(event.Daddr, uint32(1)); err != nil {
-					logger.Log.Warnf("failed to update allow list (map): %v", err)
-				} else {
-					logger.Log.Infof("ip [%d] added into allowed list", event.Daddr)
-				}
-			} else {
-				policyStatus = domain.EventPolicyStatusBlock
 			}
 			reportEvent.Policy = policyStatus
 		}
@@ -127,7 +109,7 @@ func (rt *tracerRuntime) ipv4EventLoop(reader *ringbuf.Reader) {
 }
 
 // ipv6EventLoop processes IPv6 network connection events. It works the same
-// as the IPv4 loop but handles 128-bit addresses and updates the IPv6 allow map.
+// as the IPv4 loop but handles 128-bit destination addresses.
 func (rt *tracerRuntime) ipv6EventLoop(reader *ringbuf.Reader) {
 	for {
 		record, err := reader.Read()
@@ -156,9 +138,6 @@ func (rt *tracerRuntime) ipv6EventLoop(reader *ringbuf.Reader) {
 		if exeName := utils.ResolveCommFromExe(event.Pid); exeName != "" {
 			taskname = exeName
 		}
-		if taskname == progName {
-			continue
-		}
 
 		protocol := utils.GetProtocol(event.Proto)
 		var policyStatus = domain.EventPolicyStatusPass
@@ -175,23 +154,13 @@ func (rt *tracerRuntime) ipv6EventLoop(reader *ringbuf.Reader) {
 		}
 
 		if rt.tracerMode != domain.TracerModeMonitor {
-			result, err := rt.policyPtr.Load().EvalEventCached(context.Background(), reportEvent)
+			result, err := rt.evaluateConnection(reportEvent, event.Cookie, event.Proto)
+			policyStatus = domain.EventPolicyStatusBlock
 			if err != nil {
-				logger.Log.Debugf("ipv6 policy eval failed: %v", err)
-				continue
+				logger.Log.Warnf("IPv6 connection policy failed: %v", err)
 			}
 			if result {
 				policyStatus = domain.EventPolicyStatusPass
-				// Dynamically allow this IPv6 address in the BPF map.
-				if rt.allowedIPv6Map != nil {
-					var addrKey [16]byte
-					copy(addrKey[:], event.Daddr[:])
-					if err := rt.allowedIPv6Map.Put(addrKey, uint32(1)); err != nil {
-						logger.Log.Warnf("failed to update ipv6 allow list: %v", err)
-					}
-				}
-			} else {
-				policyStatus = domain.EventPolicyStatusBlock
 			}
 			reportEvent.Policy = policyStatus
 		}

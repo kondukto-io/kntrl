@@ -2,7 +2,6 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 
@@ -20,6 +19,25 @@ env:
   NILAWAY_VERSION: v0.0.0-20260915122131-cb17e847f492
 
 jobs:
+  network-enforcement:
+    name: Kernel network enforcement
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b
+        with:
+          go-version-file: go.mod
+      - name: Compile eBPF and regression tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang
+          clang -target bpf -D__TARGET_ARCH_x86 -O2 -g -Wall -Werror -I bpf/headers -c bpf/sensor.bpf.c -o internal/handlers/tracer/bpf_x86_bpfel.o
+          go test -c -tags=ebpf -o /tmp/kntrl-network-tests ./internal/handlers/tracer
+      - name: Verify kernel DNS and socket isolation
+        run: sudo /tmp/kntrl-network-tests -test.v -test.run='Test(DNSEgress|SocketGrantIsolation)$' -test.timeout=60s
+
   vet-and-test:
     name: Vet & Test
     runs-on: ubuntu-latest
