@@ -1,5 +1,5 @@
 # Stage 1: Build environment with eBPF toolchain
-FROM golang:1.25-bookworm AS builder
+FROM golang:1.26.8-bookworm AS builder
 
 # Install eBPF build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install OPA CLI for Rego tests
 RUN ARCH=$(dpkg --print-architecture) && \
-    wget -q -O /usr/local/bin/opa https://openpolicyagent.org/downloads/v0.68.0/opa_linux_${ARCH}_static \
+    wget -q -O /usr/local/bin/opa https://openpolicyagent.org/downloads/v1.4.0/opa_linux_${ARCH}_static \
     && chmod +x /usr/local/bin/opa
 
 WORKDIR /src

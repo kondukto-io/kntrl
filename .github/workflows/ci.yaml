@@ -9,6 +9,16 @@ on:
 permissions:
   contents: read
 
+env:
+  # Packages that build without the generated eBPF object. `internal/handlers/tracer`
+  # embeds bpf_x86_bpfel.o, which is gitignored and produced by `make generate`
+  # (needs the clang toolchain). Vet/test and nilaway skip code generation;
+  # define their package set once so these checks cannot drift apart.
+  ANALYZE_PKGS: ./pkg/... ./internal/core/...
+  # Analysis tools are pinned, like every action SHA below. Bump deliberately.
+  GOVULNCHECK_VERSION: v1.8.0
+  NILAWAY_VERSION: v0.0.0-20260915122131-cb17e847f492
+
 jobs:
   vet-and-test:
     name: Vet & Test
@@ -19,7 +29,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
         with:
-          go-version: '1.25'
+          go-version-file: go.mod
           cache: true
           cache-dependency-path: ./go.sum
       - name: Verify go.sum
@@ -27,9 +37,27 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
       - name: Go vet
-        run: go vet ./pkg/... ./internal/core/...
+        run: go vet $ANALYZE_PKGS
       - name: Unit tests
-        run: go test -count=1 -race ./pkg/... ./internal/core/...
+        run: go test -count=1 -race $ANALYZE_PKGS
+
+  # Keep this separate: branch protection requires a check named "Nilaway".
+  nilaway:
+    name: Nilaway
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Set up Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: ./go.sum
+      - name: Install nilaway
+        run: go install go.uber.org/nilaway/cmd/nilaway@$NILAWAY_VERSION
+      - name: Run nilaway
+        run: nilaway -exclude-test-files $ANALYZE_PKGS
 
   govulncheck:
     name: Govulncheck
@@ -40,27 +68,25 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
         with:
-          go-version: '1.25'
+          go-version-file: go.mod
           cache: true
           cache-dependency-path: ./go.sum
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
-      - name: Run govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION
+      # Module findings include packages we never import (e.g. x/crypto/openpgp).
+      # JSON reports all findings without failing on vulnerability findings;
+      # operational errors still fail. The symbol scan below is the blocking gate.
+      # Module-only scanning does not accept package patterns.
+      - name: Report module vulnerabilities (informational)
+        run: govulncheck -scan module -format json
+      - name: Install eBPF build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-16 llvm-16
+      - name: Generate eBPF object
+        run: make generate CLANG=clang-16
+      # Generate the real object so the symbol scan covers the entire application,
+      # including cmd and internal/handlers/tracer, not just ANALYZE_PKGS.
+      # Fail when vulnerable symbols are reachable from our code.
+      - name: Scan reachable symbols
         run: govulncheck ./...
-
-  nilaway:
-    name: Nilaway
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - name: Set up Go
-        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
-        with:
-          go-version: '1.25'
-          cache: true
-          cache-dependency-path: ./go.sum
-      - name: Install nilaway
-        run: go install go.uber.org/nilaway/cmd/nilaway@latest
-      - name: Run nilaway
-        run: nilaway -exclude-test-files ./pkg/... ./internal/...

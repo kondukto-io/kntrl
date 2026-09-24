@@ -20,7 +20,6 @@ import (
 	"io/fs"
 	"os"
 	"os/signal"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -47,7 +46,7 @@ import (
 )
 
 var (
-	//go:embed bpf_bpfel_x86.o
+	//go:embed bpf_x86_bpfel.o
 	prog []byte
 )
 
@@ -403,17 +402,8 @@ func initFileMonitor(ebpfClient *ebpfman.EBPF, cmd *cobra.Command, rulesFile, ru
 
 	// When monitoring environment variables, automatically add /proc/*/environ
 	// to the watch list so BPF captures reads of that pseudo-file.
-	if len(monitoredEnvVars) > 0 {
-		hasEnvironPath := false
-		for _, p := range monitoredPaths {
-			if strings.Contains(p, "/environ") {
-				hasEnvironPath = true
-				break
-			}
-		}
-		if !hasEnvironPath {
-			monitoredPaths = append(monitoredPaths, "/proc/self/environ")
-		}
+	if len(monitoredEnvVars) > 0 && !utils.OneOfContains("/environ", monitoredPaths) {
+		monitoredPaths = append(monitoredPaths, "/proc/self/environ")
 	}
 
 	if !fileMonitorEnabled {
