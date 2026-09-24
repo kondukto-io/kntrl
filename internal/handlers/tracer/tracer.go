@@ -46,7 +46,7 @@ import (
 )
 
 var (
-	//go:embed bpf_bpfel_x86.o
+	//go:embed bpf_x86_bpfel.o
 	prog []byte
 )
 

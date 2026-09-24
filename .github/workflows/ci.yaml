@@ -11,9 +11,9 @@ permissions:
 
 env:
   # Packages that build without the generated eBPF object. `internal/handlers/tracer`
-  # embeds bpf_bpfel_x86.o, which is gitignored and produced by `make generate`
-  # (needs the clang toolchain), so it cannot be type-checked here. Defined once
-  # so vet, test and nilaway cannot drift apart.
+  # embeds bpf_x86_bpfel.o, which is gitignored and produced by `make generate`
+  # (needs the clang toolchain). The vet-and-test job skips code generation;
+  # define its package set once so vet, test and nilaway cannot drift apart.
   ANALYZE_PKGS: ./pkg/... ./internal/core/...
   # Analysis tools are pinned, like every action SHA below. Bump deliberately.
   GOVULNCHECK_VERSION: v1.8.0
@@ -61,12 +61,20 @@ jobs:
           cache-dependency-path: ./go.sum
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION
-      # Module scan needs no build, so it covers every dependency of the whole
-      # module — including the packages ANALYZE_PKGS has to leave out.
-      - name: Scan dependencies
-        run: govulncheck -scan module ./...
-      # Symbol scan is precise (reports only vulnerabilities actually reachable
-      # from our code) but requires type-checking, so it is limited to the
-      # buildable packages.
+      # Module findings include packages we never import (e.g. x/crypto/openpgp).
+      # JSON reports all findings without failing on vulnerability findings;
+      # operational errors still fail. The symbol scan below is the blocking gate.
+      # Module-only scanning does not accept package patterns.
+      - name: Report module vulnerabilities (informational)
+        run: govulncheck -scan module -format json
+      - name: Install eBPF build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-16 llvm-16
+      - name: Generate eBPF object
+        run: make generate CLANG=clang-16
+      # Generate the real object so the symbol scan covers the entire application,
+      # including cmd and internal/handlers/tracer, not just ANALYZE_PKGS.
+      # Fail when vulnerable symbols are reachable from our code.
       - name: Scan reachable symbols
-        run: govulncheck $ANALYZE_PKGS
+        run: govulncheck ./...
