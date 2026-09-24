@@ -1,5 +1,5 @@
 # Stage 1: Build environment with eBPF toolchain
-FROM golang:1.25-bookworm@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437 AS builder
+FROM golang:1.26.8-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d AS builder
 
 # Install eBPF build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -15,11 +15,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Verify downloaded executable bytes before allowing the build to execute them.
 RUN ARCH=$(dpkg --print-architecture) && \
     case "$ARCH" in \
-      amd64) OPA_SHA256=dfd5081fc6f930dfeaf2a225e31e616fc227dc0c7b43019b73d6f8fb8a1de1aa ;; \
-      arm64) OPA_SHA256=1a583e593cdf4931c0b0bbedd3c9f585012953449115bcc3e15b3806d0f5ee68 ;; \
+      amd64) OPA_SHA256=1a2337dbd75d623d759c9e47f64564f101b6923b069663f06f14377b6bb83119 ;; \
+      arm64) OPA_SHA256=4553440d99b858f657750a510ac08d67acb078bcbcf62ed666c5df0a4d9d45ab ;; \
       *) exit 1 ;; \
     esac && \
-    wget -q -O /usr/local/bin/opa https://openpolicyagent.org/downloads/v0.68.0/opa_linux_${ARCH}_static \
+    wget -q -O /usr/local/bin/opa https://openpolicyagent.org/downloads/v1.4.0/opa_linux_${ARCH}_static \
     && printf '%s  %s\n' "$OPA_SHA256" /usr/local/bin/opa | sha256sum -c - \
     && chmod +x /usr/local/bin/opa
 

@@ -6,7 +6,7 @@ import "net"
 // In OPA, decisions are made by comparing "policy" (Rego Code) and "data" (JSON).
 type Data struct {
 	// The allowed hosts from the cmd package.
-	// The 'parser' package will append the host machine's DNS servers.
+	// DNS resolver permissions are separate from general network grants.
 	AllowedHosts []string `json:"allowed_hosts"`
 	// Allowed IPs.
 	AllowedIPs []net.IP `json:"allowed_ip_addr"`

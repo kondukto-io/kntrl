@@ -16,7 +16,6 @@ import (
 
 	"github.com/kondukto-io/kntrl/internal/core/domain"
 	"github.com/kondukto-io/kntrl/pkg/config"
-	"github.com/kondukto-io/kntrl/pkg/parser"
 	"github.com/kondukto-io/kntrl/pkg/policy"
 )
 
@@ -186,11 +185,14 @@ func parseFlags(cmd *cobra.Command) (*domain.Data, error) {
 		return nil, err
 	}
 
-	return parser.ToDataJson(
-		allowedHosts,
-		allowedIPs,
-		ghmeta,
-		localranges,
-		allowmeta,
-	), nil
+	flags := gatherCLIFlags(cmd)
+	flags.AllowGithubMeta = &ghmeta
+	flags.AllowLocalRanges = &localranges
+	flags.AllowMetadata = &allowmeta
+	cfg := config.ApplyCLIFlags(&config.PolicyConfig{}, flags)
+	if err := config.Validate(cfg); err != nil {
+		return nil, err
+	}
+	_, data, err := config.ToOPAData(cfg)
+	return data, err
 }

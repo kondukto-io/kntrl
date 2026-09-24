@@ -1,7 +1,10 @@
 # Release integrity
 
-Tag pushes run the reusable CI workflow against the release commit. A failing
-test or vulnerability scan prevents the build and publish jobs from running.
+Tag pushes run the reusable CI workflow against the release commit. Failing
+tests, scanner errors, or vulnerabilities reachable from the code prevent the
+build and publish jobs from running. Govulncheck scans the entire application
+after generating the eBPF object. Module-level findings are reported as JSON
+for review but do not block publication when the symbol scan passes.
 
 The build job has only `contents: read`, does not persist checkout credentials,
 does not restore a Go build cache, and uses a fixed GoReleaser version. Build

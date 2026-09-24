@@ -57,11 +57,10 @@ func Merge(base, override *PolicyConfig) *PolicyConfig {
 		override.Rules.Process.BlockedExecutables...,
 	))
 
-	// Merge DNS rules
-	result.Rules.DNS.AllowedServers = dedup(append(
-		result.Rules.DNS.AllowedServers,
-		override.Rules.DNS.AllowedServers...,
-	))
+	// An explicit DNS list replaces inherited defaults, including an empty list.
+	if override.Rules.DNS.AllowedServers != nil {
+		result.Rules.DNS.AllowedServers = append([]string{}, override.Rules.DNS.AllowedServers...)
+	}
 
 	// Merge file rules
 	if override.Rules.File.Enabled != nil {

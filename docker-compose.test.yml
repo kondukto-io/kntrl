@@ -27,7 +27,7 @@ services:
       dockerfile: Dockerfile.test
       target: test-runner
     command: >
-      opa test -v ./bundle/...
+      opa test --v0-compatible -v ./bundle
 
   # eBPF tests - requires privileged mode and kernel access
   test-ebpf:
@@ -118,7 +118,7 @@ services:
       bash -c '
         set -e
         echo "=== Running Rego tests ==="
-        opa test -v ./bundle/...
+        opa test --v0-compatible -v ./bundle
         echo "=== Running unit tests ==="
         go test -v -count=1 ./pkg/... ./internal/core/...
         echo "=== Running eBPF tests ==="

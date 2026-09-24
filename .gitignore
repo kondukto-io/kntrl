@@ -4,6 +4,7 @@
 # ignore object files
 internal/**/*.o
 internal/**/*x86.go
+internal/**/*_bpfel.go
 /kntrl
 /build/
 
