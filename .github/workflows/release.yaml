@@ -5,37 +5,85 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]*'
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ci-tag-1
-  cancel-in-progress: true
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  verify:
+    name: Verify release commit
+    uses: ./.github/workflows/ci.yaml
+    permissions:
+      contents: read
+
   build:
-    name: Build
-    runs-on: ubuntu-latest
-
+    name: Build without publishing credentials
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
-      - name: Install Dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential git cmake zlib1g-dev libevent-dev libelf-dev llvm clang libc6-dev-i386 clang-19 libclang-common-19-dev libclang-19-dev
-
-      - name: Checkout Code
+      - name: Checkout release commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Set up Go
         uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b
         with:
           go-version-file: go.mod
-          cache: true
-          cache-dependency-path: ./go.sum
-
-      - name: Run GoReleaser
+          cache: false
+      - name: Install eBPF compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19 llvm-19 libelf-dev
+      - name: Build release artifacts
         uses: goreleaser/goreleaser-action@9c156ee8a17a598857849441385a2041ef570552
-        if: startsWith(github.ref, 'refs/tags/')
         with:
-          # 'latest', 'nightly', or a semver
-          version: '~> v2'
-          args: release --clean
+          version: v2.18.1
+          args: release --clean --skip=publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GO_RELEASER_GITHUB_TOKEN }}
-          DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Stage only public release assets
+        run: |
+          mkdir release
+          cp dist/kntrl release/kntrl.amd64
+          cp dist/kntrl_arm64 release/kntrl_arm64.arm64
+          cp dist/checksums.txt release/
+          (cd release && sha256sum --check checksums.txt)
+      - name: Transfer artifacts to publishing job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kntrl-release-assets
+          path: release/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Attest and publish
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      # No checkout or execution of project/build code in this job.
+      - name: Download artifacts from this workflow run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: kntrl-release-assets
+          path: release
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: release/*
+      - name: Publish existing tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" release/kntrl.amd64 release/kntrl_arm64.arm64 release/checksums.txt --verify-tag --title "$RELEASE_TAG" --generate-notes
