@@ -9,4 +9,5 @@ test_allowed_ip{
 
 test_not_allowed_ip{
 	not rule.policy with input as {"daddr":"140.88.114.222", "domains": ["foo.com"]}
+		with data.allowed_ip_addr as ["140.82.114.222"]
 }

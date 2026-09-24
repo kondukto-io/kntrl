@@ -11,4 +11,5 @@ test_allow_github_meta {
 # test local ip
 test_deny_allow_github_meta {
 	not rule.policy with input as {"daddr":"1.2.3.4", "domains": ["foo.bar"]}
+		with data.allow_github_meta as true
 }

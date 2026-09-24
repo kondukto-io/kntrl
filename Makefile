@@ -47,7 +47,7 @@ build:
 
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f ./internal/handlers/tracer/bpf_bpfel_x86.o ./internal/handlers/tracer/bpf_bpfel_x86.go
+	rm -f ./internal/handlers/tracer/bpf_x86_bpfel.o ./internal/handlers/tracer/bpf_x86_bpfel.go
 
 # =====================
 # Docker Build
@@ -99,7 +99,7 @@ test-all:
 # Internal target used inside Docker container
 test-all-docker:
 	@echo "=== Running Rego tests ==="
-	opa test -v ./bundle/...
+	opa test --v0-compatible -v ./bundle
 	@echo "=== Running unit tests ==="
 	go test -v -count=1 ./pkg/... ./internal/core/...
 	@echo "=== Running eBPF tests ==="
@@ -116,7 +116,7 @@ test-unit-local:
 
 # Run Rego tests locally (requires opa CLI)
 test-rego-local:
-	opa test -v ./bundle/...
+	opa test --v0-compatible -v ./bundle
 
 # =====================
 # Cleanup
