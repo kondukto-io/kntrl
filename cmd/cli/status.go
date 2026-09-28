@@ -33,11 +33,10 @@ func initStatusCommand() *cobra.Command {
 			}
 
 			if err := process.Signal(syscall.Signal(0)); err != nil {
-				qwm(127, "kntrl is not running!")
-
-				if err := os.Remove(pidfile); err != nil {
-					qwe(127, err, "failed to remove pidfile")
+				if rmErr := os.Remove(pidfile); rmErr != nil {
+					qwe(127, rmErr, "failed to remove pidfile")
 				}
+				qwm(127, "kntrl is not running!")
 			}
 
 			qwm(0, "Running with PID: "+strconv.Itoa(pid))
